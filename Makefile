@@ -1,4 +1,4 @@
-# OpenBake. Needs only Docker >= 24 with buildx (Docker Desktop, OrbStack,
+# OpenBake. Needs only Docker >= 25 with buildx (Docker Desktop, OrbStack,
 # Colima and Docker Engine all include it). Ansible runs inside the build.
 #
 #   make image                       build devbox, data and agent for this machine
@@ -26,16 +26,23 @@ export WS_REGISTRY WS_TAG
 ref = $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$(1):$(WS_TAG)
 
 .DEFAULT_GOAL := help
-.PHONY: help image smoke lint check scan ci custom run-devbox run-data run-agent prune-cache
+.PHONY: help image smoke lint check check-ci scan ci custom run-devbox run-data run-agent prune-cache
 
 # Roles per image, in layer order (replaced by ansible/profiles/*.yml in M2).
 ROLES_minimal := base,git
 ROLES_devbox  := base,git,runtimes,neovim,code_server
 ROLES_data    := base,git,runtimes,postgres,data_sample
 ROLES_agent   := base,git,runtimes,agents
-LINT_IMAGE    := ws-lint:$(WS_TAG)
-SCAN_IMAGE    := ws-scan:$(WS_TAG)
+LINT_IMAGE    = $(call ref,lint)
+SCAN_IMAGE    = $(call ref,scan)
 SCAN_PROFILES ?= minimal devbox data agent
+TRIVY = docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+	  -v ws-trivy-cache:/root/.cache/trivy -v "$(CURDIR)/security:/security:ro" \
+	  $(SCAN_IMAGE) image --ignorefile /security/trivyignore.yaml --exit-code 1 --no-progress
+# Check-mode policy shared by CI and `make ci`: blocking profiles fail the run;
+# report-only profiles (spike roles, fixed in M4) only warn.
+CHECK_BLOCKING    ?= minimal
+CHECK_REPORT_ONLY ?= devbox data agent
 
 help:
 	@sed -n '1,/^$$/p' Makefile | sed 's/^# \{0,1\}//'
@@ -44,10 +51,11 @@ image:
 	$(BAKE) $(or $(PROFILE),default)
 
 smoke:
-	bash images/smoke.sh $(PROFILE)
+	CUSTOM_ROLES="$(CUSTOM_ROLES)" bash images/smoke.sh $(PROFILE)
 
 # All tools run in a container built from the Dockerfile `lint` stage.
 lint:
+	docker buildx bake -f images/docker-bake.hcl --print minimal devbox data agent custom lint check scan > /dev/null
 	$(BAKE) lint
 	docker run --rm -v "$(CURDIR):/src:ro" -e ANSIBLE_ROLES_PATH=/src/custom/roles:/src/ansible/roles \
 	  -e ANSIBLE_CONFIG=/src/ansible/ansible.cfg -e HOME=/tmp $(LINT_IMAGE) sh -euc '\
@@ -58,19 +66,28 @@ lint:
 	    echo "== ansible-lint"; ansible-lint; \
 	    echo "== actionlint"; actionlint; \
 	    echo "== actions pinned to commit SHAs"; \
-	    ! grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; \
+	    if grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; then \
+	      echo "unpinned action(s) above: pin to a full commit SHA" >&2; exit 1; fi; \
 	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh \
 	      ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info'
+
+# check with the CI policy (blocking vs report-only), limited to PROFILE when given.
+CI_SELECTED = $(or $(PROFILE),$(CI_PROFILES))
+check-ci:
+	$(if $(filter $(CHECK_BLOCKING),$(CI_SELECTED)),$(MAKE) check PROFILE="$(filter $(CHECK_BLOCKING),$(CI_SELECTED))")
+	@for p in $(filter $(CHECK_REPORT_ONLY),$(CI_SELECTED)); do \
+	  $(MAKE) check PROFILE=$$p || echo "::warning::check mode not clean for $$p (report-only until M4)"; \
+	done
 
 # Same steps as .github/workflows/ci.yml; CI only adds runners, caching and the arch matrix.
 CI_PROFILES ?= minimal devbox data agent
 ci:
 	$(MAKE) lint
-	$(MAKE) image PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
-	$(MAKE) smoke PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
-	$(MAKE) check PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
-	$(MAKE) scan PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
-	$(if $(filter devbox,$(or $(PROFILE),$(CI_PROFILES))),$(MAKE) custom FROM=devbox ROLES=hello_custom && $(MAKE) smoke PROFILE=custom)
+	$(MAKE) image PROFILE="$(CI_SELECTED)"
+	$(MAKE) smoke PROFILE="$(CI_SELECTED)"
+	$(MAKE) check-ci PROFILE="$(CI_SELECTED)"
+	$(MAKE) scan PROFILE="$(CI_SELECTED)"
+	$(if $(filter devbox,$(CI_SELECTED)),$(MAKE) custom FROM=devbox ROLES=hello_custom && $(MAKE) smoke PROFILE=custom CUSTOM_ROLES=hello_custom)
 
 # Builds the `check` stage on top of the image stage (from the build cache: run make image first).
 check:
@@ -83,17 +100,16 @@ check:
 	done
 
 # Trivy runs in a container and reads images through the Docker socket.
-# Gate: CRITICAL vulnerabilities that have a fixed version, and secrets in layers.
+# Two passes, because --severity also filters secret findings: vulnerabilities
+# fail on CRITICAL with a fixed version; secrets fail at any severity.
 # Accepted findings go in security/trivyignore.yaml (each with a reason and expiry).
 scan:
 	$(BAKE) scan
 	@for p in $(or $(PROFILE),$(SCAN_PROFILES)); do \
 	  echo "== trivy: $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$$p:$(WS_TAG)"; \
-	  docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
-	    -v ws-trivy-cache:/root/.cache/trivy -v "$(CURDIR)/security:/security:ro" \
-	    $(SCAN_IMAGE) image --scanners vuln,secret --severity CRITICAL --ignore-unfixed \
-	    --ignorefile /security/trivyignore.yaml --exit-code 1 --no-progress \
-	    $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$$p:$(WS_TAG) || exit 1; \
+	  img="$(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$$p:$(WS_TAG)"; \
+	  $(TRIVY) --scanners vuln --severity CRITICAL --ignore-unfixed "$$img" || exit 1; \
+	  $(TRIVY) --scanners secret "$$img" || exit 1; \
 	done
 
 custom:

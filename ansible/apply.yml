@@ -29,9 +29,13 @@
       check_mode: false
       when: ansible_facts.os_family == 'Debian'
 
+    # Cache-only: it does not change what the image or host has installed, so it
+    # also runs in check mode and never counts as a change.
     - name: Refresh apt package lists when they are empty
       ansible.builtin.apt:
         update_cache: true
+      check_mode: false
+      changed_when: false
       when:
         - ansible_facts.os_family == 'Debian'
         - ws_apt_lists.matched == 0

@@ -4,7 +4,7 @@ Thanks for helping. OpenBake is early, so please open an issue before large chan
 
 ## Setup
 
-Docker ≥ 24 with buildx, `make` and `git`. Nothing else.
+Docker ≥ 25 with buildx, `make` and `git`. Nothing else.
 
 ```sh
 make image PROFILE=minimal && make smoke PROFILE=minimal   # fastest loop

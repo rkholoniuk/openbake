@@ -49,7 +49,13 @@ for image in "${images[@]}"; do
       check agent "claude"               'claude --version'
       ;;
     custom)
-      check custom "custom roles ran"    'ls /etc/ws-image | tr "\n" " "'
+      # CUSTOM_ROLES (comma-separated) names the roles that must have run.
+      for r in ${CUSTOM_ROLES//,/ }; do
+        check custom "role $r ran"       "test -f /etc/ws-image/$r.json && cat /etc/ws-image/$r.json"
+      done
+      if [[ ",${CUSTOM_ROLES:-}," == *",hello_custom,"* ]]; then
+        check custom "hello_custom packages" 'htop --version | head -1 && command -v tree'
+      fi
       ;;
   esac
   check "$image" "image manifest"        'ws-info | jq -c -s "map(.role)"'

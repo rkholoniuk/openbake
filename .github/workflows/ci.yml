@@ -25,8 +25,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-      - name: Bake file resolves
-        run: docker buildx bake -f images/docker-bake.hcl --print minimal devbox data agent custom lint check scan > /dev/null
       # yamllint, --syntax-check, ansible-lint, actionlint and shellcheck, inside the lint image.
       - name: make lint
         run: make lint
@@ -54,6 +52,10 @@ jobs:
           df -h /
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+        with:
+          # Exact buildx and BuildKit (by digest), not the action's moving defaults.
+          version: v0.39.0
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
       # Exposes the cache service variables to `run:` steps for type=gha caching.
       - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487  # v4.0.0
 
@@ -69,14 +71,10 @@ jobs:
         run: make smoke PROFILE="minimal devbox data agent"
 
       # Re-apply each image's roles with --check --diff: must report changed=0.
+      # Blocking for CHECK_BLOCKING, warnings for CHECK_REPORT_ONLY (Makefile),
+      # the same policy `make ci` uses.
       - name: Check mode
-        run: make check PROFILE=minimal
-      # Spike roles still use changed_when: true and treat the download cache as
-      # state; M4 fixes them (probe-then-act) and folds these into the step above.
-      - name: Check mode (report only until M4)
-        continue-on-error: true
-        run: |
-          for p in devbox data agent; do make check PROFILE=$p || echo "::warning::check mode not clean for $p (M4)"; done
+        run: make check-ci PROFILE="minimal devbox data agent"
 
       # Gate: CRITICAL vulnerabilities with a fix available, and secrets in layers.
       - name: Trivy scan
@@ -85,4 +83,4 @@ jobs:
       - name: Custom image
         run: |
           make custom FROM=devbox ROLES=hello_custom
-          make smoke PROFILE=custom
+          make smoke PROFILE=custom CUSTOM_ROLES=hello_custom

@@ -2,7 +2,7 @@
 
 Open-source dev workspaces baked with Ansible, run with Docker and OpenTofu.
 
-**You only need Docker** (≥ 24 with buildx: Docker Desktop, OrbStack, Colima or Docker Engine),
+**You only need Docker** (≥ 25 with buildx: Docker Desktop, OrbStack, Colima or Docker Engine),
 plus `make` and `git`. Ansible runs *inside* the image build and never ends up in an image.
 
 Status: early. Building images works today. Running workspaces with `make up` (OpenTofu) and
