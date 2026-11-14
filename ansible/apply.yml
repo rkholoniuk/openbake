@@ -5,6 +5,8 @@
   gather_facts: true
   gather_subset: [min]
   vars:
+    # image: inside `docker build`; host: a real machine (roles assert what they support).
+    ws_target: host
     # Shared by all roles; override with WSV_WS_USER etc. if you need another user.
     ws_user: user
     ws_uid: 1000

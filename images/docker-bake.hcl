@@ -1,15 +1,21 @@
-# docker buildx bake               -> devbox, data, agent (base is shared, built once)
-# docker buildx bake agent         -> one image
-# WS_PLATFORMS=linux/amd64,linux/arm64 WS_REGISTRY=ghcr.io/acme/ws docker buildx bake --push
+# Run from the repo root (the Makefile does this):
+#
+#   docker buildx bake -f images/docker-bake.hcl --load            devbox, data, agent
+#   docker buildx bake -f images/docker-bake.hcl --load agent      one image
+#   WS_PLATFORMS=linux/amd64,linux/arm64 WS_REGISTRY=ghcr.io/rkh0x7ea/openbake \
+#     docker buildx bake -f images/docker-bake.hcl --push
+#
+# Images are named ws-<profile>:<WS_TAG>, prefixed with WS_REGISTRY/ when it is set.
 #
 # Every variable can be set from the environment. They all start with WS_ so
 # unrelated shell variables (TAG, CLAUDE_CODE_VERSION, ...) can't leak in.
 
-variable "WS_REGISTRY" { default = "local/ws" }
-variable "WS_TAG" { default = "dev" }
+variable "WS_REGISTRY" { default = "" }             # empty = local image names only
+variable "WS_TAG" { default = "local" }
 variable "WS_PLATFORMS" { default = "" }            # empty = this machine's platform
 variable "WS_BASE_IMAGE" { default = "ubuntu:24.04" }
 
+# Per-version overrides (spike mechanism; replaced by versions.yml + WS_EXTRA_VARS in M3).
 # Empty means "use the role default". Lists are JSON.
 variable "WS_RUNTIMES_INSTALLER" { default = "" }   # mise | system
 variable "WS_PYTHON_VERSIONS" { default = "" }      # e.g. ["3.13","3.12"]  (first = default)
@@ -26,13 +32,18 @@ variable "WS_CUSTOM_FROM" { default = "devbox" }
 variable "WS_CUSTOM_ROLES" { default = "" }
 variable "WS_CUSTOM_VARS" { default = "" }          # JSON object of extra role variables
 
+function "image" {
+  params = [profile]
+  result = WS_REGISTRY == "" ? "ws-${profile}:${WS_TAG}" : "${WS_REGISTRY}/ws-${profile}:${WS_TAG}"
+}
+
 group "default" {
   targets = ["devbox", "data", "agent"]
 }
 
 target "_common" {
   context    = "."
-  dockerfile = "Dockerfile"
+  dockerfile = "images/Dockerfile"
   platforms  = WS_PLATFORMS == "" ? [] : split(",", WS_PLATFORMS)
   # Optional: raises GitHub's API rate limit for mise. Never stored in a layer.
   secret = ["id=github_token,env=GITHUB_TOKEN"]
@@ -50,34 +61,34 @@ target "_common" {
   }
 }
 
-target "base" {
+target "minimal" {
   inherits = ["_common"]
-  target   = "base"
-  tags     = ["${WS_REGISTRY}/base:${WS_TAG}"]
+  target   = "minimal"
+  tags     = [image("minimal")]
 }
 
 target "devbox" {
   inherits = ["_common"]
   target   = "devbox"
-  tags     = ["${WS_REGISTRY}/devbox:${WS_TAG}"]
+  tags     = [image("devbox")]
 }
 
 target "data" {
   inherits = ["_common"]
   target   = "data"
-  tags     = ["${WS_REGISTRY}/data:${WS_TAG}"]
+  tags     = [image("data")]
 }
 
 target "agent" {
   inherits = ["_common"]
   target   = "agent"
-  tags     = ["${WS_REGISTRY}/agent:${WS_TAG}"]
+  tags     = [image("agent")]
 }
 
 target "custom" {
   inherits = ["_common"]
   target   = "custom"
-  tags     = ["${WS_REGISTRY}/custom:${WS_TAG}"]
+  tags     = [image("custom")]
   args = {
     CUSTOM_FROM     = WS_CUSTOM_FROM
     CUSTOM_ROLES    = WS_CUSTOM_ROLES

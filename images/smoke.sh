@@ -1,18 +1,20 @@
 #!/usr/bin/env bash
-# Smoke-test the images: tools present, versions recorded, sample pipeline works.
-#   scripts/smoke.sh [registry] [tag] [images...]
+# Check commands are single-quoted on purpose: they expand inside the container.
+# shellcheck disable=SC2016
+# Smoke-test images: tools present, versions recorded, sample pipeline works.
+#   images/smoke.sh [profile...]        default: devbox data agent
+# Images are ws-<profile>:$WS_TAG, prefixed with $WS_REGISTRY/ when set.
 set -euo pipefail
 
-registry="${1:-local/ws}"
-tag="${2:-dev}"
-shift $(( $# > 2 ? 2 : $# ))
+tag="${WS_TAG:-local}"
+prefix="${WS_REGISTRY:+$WS_REGISTRY/}"
 images=("$@")
 [ ${#images[@]} -gt 0 ] || images=(devbox data agent)
 
 failures=0
-check() {  # check <image> <description> <command>
-  local image="$1" what="$2" cmd="$3"
-  if out=$(docker run --rm "$registry/$image:$tag" bash -lc "$cmd" 2>&1); then
+check() {  # check <profile> <description> <command>
+  local ref="${prefix}ws-$1:$tag" what="$2" cmd="$3"
+  if out=$(docker run --rm "$ref" bash -lc "$cmd" 2>&1); then
     printf '  ok    %-28s %s\n' "$what" "$(echo "$out" | tail -1)"
   else
     printf '  FAIL  %-28s\n%s\n' "$what" "$(echo "$out" | sed 's/^/        /' | tail -15)"
@@ -21,12 +23,13 @@ check() {  # check <image> <description> <command>
 }
 
 for image in "${images[@]}"; do
-  echo "== $image ($(docker image inspect -f '{{.Size}}' "$registry/$image:$tag" | awk '{printf "%.0f MB", $1/1e6}'))"
+  ref="${prefix}ws-$image:$tag"
+  echo "== $ref ($(docker image inspect -f '{{.Size}}' "$ref" | awk '{printf "%.0f MB", $1/1e6}'))"
   check "$image" "runs as user 1000"     'test "$(id -u)" = 1000 && id -un'
   check "$image" "git"                   'git --version'
   check "$image" "no ansible in image"   '! command -v ansible-playbook && ! test -e /opt/ansible && echo absent'
   check "$image" "python"                'python3 --version'
-  check "$image" "uv"                    'uv --version'
+  check "$image" "uv (if runtimes)"      'if test -f /etc/ws-image/runtimes.json; then uv --version; else echo "n/a, no runtimes role"; fi'
   case "$image" in
     devbox)
       check devbox "node"                'node --version'
@@ -44,6 +47,9 @@ for image in "${images[@]}"; do
       check agent "node"                 'node --version'
       check agent "codex"                'codex --version'
       check agent "claude"               'claude --version'
+      ;;
+    custom)
+      check custom "custom roles ran"    'ls /etc/ws-image | tr "\n" " "'
       ;;
   esac
   check "$image" "image manifest"        'ws-info | jq -c -s "map(.role)"'

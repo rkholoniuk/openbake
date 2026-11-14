@@ -1,0 +1,60 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Action versions are pinned to major tags for now; M3 pins them by commit SHA
+# and lets Renovate update them.
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bake file resolves
+        run: docker buildx bake -f images/docker-bake.hcl --print minimal devbox data agent custom > /dev/null
+      - name: shellcheck
+        run: shellcheck images/smoke.sh ansible/apply.sh ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info
+
+  images:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      # Mounted as a BuildKit secret (raises GitHub's API rate limit for mise); never in a layer.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      # Exposes the cache service variables to `run:` steps for type=gha caching.
+      - uses: crazy-max/ghaction-github-runtime@v3
+
+      - name: Build images
+        run: |
+          # One bake call per profile, so each gets its own cache scope.
+          for p in minimal devbox data agent; do
+            scope="${{ matrix.runner }}-$p"
+            make image PROFILE=$p BAKE_ARGS="--set *.cache-from=type=gha,scope=$scope --set *.cache-to=type=gha,mode=max,scope=$scope"
+          done
+
+      - name: Smoke
+        run: make smoke PROFILE="minimal devbox data agent"
+
+      - name: Custom image
+        run: |
+          make custom FROM=devbox ROLES=hello_custom
+          make smoke PROFILE=custom
