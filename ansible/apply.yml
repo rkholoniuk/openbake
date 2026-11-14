@@ -17,6 +17,24 @@
       x86_64: { deb: amd64, gnu: x86_64, node: x64 }
       aarch64: { deb: arm64, gnu: arm64, node: arm64 }
     ws_arch: "{{ ws_arch_map[ansible_facts.architecture] }}"
+  pre_tasks:
+    # In builds /var/lib/apt/lists is a BuildKit cache mount. On a fresh builder
+    # (new CI runner, pruned cache) it starts empty while cached layers above it
+    # are restored, and roles' cache_valid_time would then skip `apt update`.
+    - name: Find apt package lists
+      ansible.builtin.find:
+        paths: /var/lib/apt/lists
+        patterns: "*_Packages*"
+      register: ws_apt_lists
+      check_mode: false
+      when: ansible_facts.os_family == 'Debian'
+
+    - name: Refresh apt package lists when they are empty
+      ansible.builtin.apt:
+        update_cache: true
+      when:
+        - ansible_facts.os_family == 'Debian'
+        - ws_apt_lists.matched == 0
   tasks:
     - name: Apply role
       ansible.builtin.include_role:

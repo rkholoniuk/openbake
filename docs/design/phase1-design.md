@@ -108,8 +108,8 @@ sudo password once. Without an SSH server: `./bootstrap.sh`, then
 
 ### J5: remote server
 
-Copy `ansible/inventory/sample/` to `ansible/inventory/mylab/`, add hosts, then
-`make host PROFILE=hardened-server INVENTORY=ansible/inventory/mylab/hosts.yml`.
+Copy `ansible/inventories/example/` to `ansible/inventories/mylab/` (git-ignored), add hosts,
+then `make host PROFILE=hardened-server INVENTORY=ansible/inventories/mylab`.
 
 ## 6. Technical design
 
@@ -127,12 +127,12 @@ openbake/
 │   ├── ansible.cfg  apply.yml  apply.sh
 │   ├── profiles/            # minimal devbox data agent workstation hardened-server
 │   ├── roles/               # base git cli_tools runtimes neovim code_server postgres data_sample
-│   │                        # agents dotfiles firewall hardening auto_updates
+│   │                        # agents dotfiles firewall hardening auto_updates automation_account
 │   │   ├── agents/files/{package.json,package-lock.json}
 │   │   ├── runtimes/files/{mise.lock,uv-requirements.txt}
 │   │   └── neovim/files/{lazy-lock.json,init.lua}
 │   ├── lint/ws_secret_no_log.py
-│   └── inventory/  local.yml  sample/hosts.yml  sample/group_vars/all.yml
+│   └── inventories/  local/  test/  example/   # real ones (production/…) are git-ignored
 ├── images/  Dockerfile  docker-bake.hcl  smoke.sh
 ├── templates/docker/  versions.tf  main.tf  variables.tf  outputs.tf  .terraform.lock.hcl
 │                       README.md  tests/docker.tftest.hcl
@@ -252,7 +252,7 @@ and keeps `/opt/roles` for builds.
 
 **`make host`** runs:
 ```
-ansible-playbook -i <INVENTORY or ansible/inventory/local.yml> ansible/apply.yml \
+ansible-playbook -i <INVENTORY or ansible/inventories/local> ansible/apply.yml \
   -e ws_profile=<P> -e ws_target=host -e ws_hosts=<LIMIT or all> -e '<VARS>' -K
 ```
 
@@ -272,6 +272,7 @@ ansible-playbook -i <INVENTORY or ansible/inventory/local.yml> ansible/apply.yml
 | `dotfiles` (new) | refused | Coder dotfiles convention. Inputs: `dotfiles_repo` (validated `https://` or `git@` URL), `dotfiles_ref` (default `main`; README recommends a commit). Clones to `~/.config/ws/dotfiles` as `ws_user`, no become |
 | `firewall` (new) | refused | ufw: deny inbound, allow outbound. Rules from `firewall_allow`: a list of `{port, proto: tcp\|udp, from: any\|<cidr>, limit: bool}`. Default `[{port: "{{ ansible_port \| default(22) }}", proto: tcp, from: any, limit: true}]`. If Docker is installed, `DOCKER-USER` rules in `/etc/ufw/after.rules` drop new inbound traffic to container ports from non-local addresses unless listed |
 | `hardening` (new) | refused | **Preflight**, which stops the run on failure: `ws_user` has an authorized key; every account with an `authorized_keys` file is in `hardening_ssh_groups` (default `[ws-ssh]`) or listed in `hardening_ssh_lockout_ok`. Creates the groups and adds `ws_user`. **sshd drop-in** `/etc/ssh/sshd_config.d/50-ws.conf`: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin no`, `AllowGroups <hardening_ssh_groups>`, `X11Forwarding no`; validated with `sshd -t`. **Reload:** `ssh.service` if active (socket-activated on 24.04; port changes out of scope), then `meta: reset_connection` + `wait_for_connection` proves a fresh login works. **sysctl:** `net.ipv4.conf.all.rp_filter=2` (loose, compatible with Tailscale), `net.ipv4.conf.all.accept_redirects=0`, `net.ipv4.conf.all.send_redirects=0`, `net.ipv6.conf.all.accept_redirects=0`, `kernel.kptr_restrict=2`, `fs.inotify.max_user_watches=524288`, `fs.inotify.max_user_instances=1024` |
+| `automation_account` (new, opt-in) | refused | The **only** role that creates a user on a host, and only when listed in a profile or run on its own (`make host PROFILE=bootstrap`). Creates `automation_account_name` (default `openbake`): system shell `/bin/bash`, **locked password** (`password: "!"`), key-only login. Installs one public key per environment from `automation_account_public_key` (inventory `group_vars`, never a private key) into `~/.ssh/authorized_keys` with `copy` (0600; no `ansible.posix` dependency). Sudo drop-in `/etc/sudoers.d/90-openbake`: `Defaults:openbake !requiretty` (needed for SSH pipelining) and `openbake ALL=(root) NOPASSWD: ALL` by default, or password-backed sudo when `automation_account_sudo_nopasswd: false` (become password from the env file / `--ask-become-pass`, never in inventory); validated with `visudo -cf %s`, mode 0440. Adds the account to `hardening_ssh_groups`. After bootstrap, inventories use `ansible_user: openbake`, `ansible_become_method: sudo`, no global `ansible_become` |
 | `auto_updates` (new) | refused | `unattended-upgrades`; `/etc/apt/apt.conf.d/20auto-upgrades` with `Update-Package-Lists "1"`, `Unattended-Upgrade "1"`; security origins only; `Automatic-Reboot "false"` |
 
 **Idempotence.** Every spike `changed_when: true` (in agents, code_server, git, neovim, runtimes,
@@ -612,6 +613,9 @@ fallback for.
 | 2026-11-14 | D4: license Apache-2.0 (explicit patent grant), replacing the MIT file the repo was created with | owner |
 | 2026-11-14 | D2: registry GHCR, `ghcr.io/rkh0x7ea/openbake/ws-<profile>` | owner |
 | 2026-11-14 | D3: `make up` prefers a `ws-<p>:local` image when one exists | owner |
+| 2026-11-14 | Inventories per environment under `ansible/inventories/` (`local`, `test`, `example` committed; real ones git-ignored) | owner |
+| 2026-11-14 | Dedicated automation account for host runs (`automation_account` role, opt-in bootstrap); `become` per task or block, not per play | owner |
+| 2026-11-14 | Testing: lint (yamllint, ansible-lint, syntax check, actionlint, shellcheck), `--check` replay on built images, Trivy gate; CI is a thin wrapper over `make ci` | owner |
 | 2026-11-14 | D5: copy the spike without history (T1) | owner |
 
 ## Detailed Implementation Plan
@@ -624,7 +628,7 @@ Each task ends with its check green; checks marked *(manual)* are recorded in th
 | T2 | Stage graph, image profiles, entry point | Modify `images/Dockerfile`: rename `base` → `minimal`, `USER user`, `cli_tools` RUN, `-e ws_target=image` on every RUN including `custom`, `-e ws_profile` in final stages, remove `EXPOSE`, copy profiles into the `ansible` stage. Create `ansible/roles/cli_tools` (6.3), profiles `minimal`, `devbox`, `data`, `agent`. Modify `ansible/apply.yml`, `ansible/apply.sh`, `ansible/ansible.cfg` (6.2), `images/docker-bake.hcl` (`minimal` target), `images/smoke.sh`, `agents` and `neovim` defaults. Create `scripts/profiles-consistency.py` and add it to `ci.yml` | consistency script passes; all 4 images build and smoke on both architectures | 1.5 |
 | T3 | Values and pinning | Create `versions.yml` (6.2 schema), `renovate.json`, `scripts/check-pins.py`, `scripts/update-checksums.py`, `.github/workflows/checksums.yml`, lock files for agents, runtimes, neovim. Modify all roles' defaults to use `versions.*`; `apply.yml` (`include_vars`); Dockerfile `ansible` stage, `ARG WSV_EXTRA_VARS`; `images/docker-bake.hcl`; `git` defaults (`static`) | `check-pins.py` passes; images build and smoke; *(manual)* a test Renovate PR gets a verified checksum commit | 2.5 |
 | T4 | Spike roles host-safe and idempotent | Modify `base` (host branch, target assert, `ws-env.sh`), `ws-init` (strict env loading; `cd ~/workspace`), `neovim` (read-only layout, spike first), `code_server` (bind per target, host password file), `agents` (`npm ci`, links), `runtimes`, `data_sample`, `git`, `postgres`: target asserts and real change conditions. Modify `images/smoke.sh`. Create `tests/idempotence.sh` and add it to `ci.yml` | `idempotence.sh` passes for every image-capable role; smoke passes; *(manual)* a home created by the old image sees new plugins after an image update | 2.5 |
-| T5 | Host path (native) | Create `bootstrap.sh`, `ansible/inventory/{local.yml,sample/hosts.yml,sample/group_vars/all.yml}`; Makefile `host` with `NATIVE=1`; `.github/workflows/host.yml` jobs for `devbox` and `agent` | `host.yml` jobs pass per the matrix (6.7) | 1 |
+| T5 | Host path (native) | Create `bootstrap.sh`, `ansible/inventories/{local,test,example}/`; Makefile `host` with `NATIVE=1`; `.github/workflows/host.yml` jobs for `devbox` and `agent` | `host.yml` jobs pass per the matrix (6.7) | 1 |
 | T6 | New host roles and host profiles | Create roles `dotfiles`, `firewall`, `hardening`, `auto_updates` (target asserts, `meta/argument_specs.yml`); argument specs for the other 9 roles; profiles `workstation`, `hardened-server`; `host.yml` jobs for both and the over-SSH job; target-refusal tests in `ci.yml` | `host.yml` matrix passes; refusal tests pass | 2 |
 | T7 | Docker template and workspace commands (native) | Create `templates/docker/*`, `scripts/docker-endpoint.sh`; Makefile `up stop down ls shell password` with `NATIVE=1`; remove `run-*`; `tofu test` in `ci.yml`; remote template job in `host.yml` | `tofu test` (all 7 steps) and the remote job pass | 2.5 |
 | T8 | Secrets and lint | Modify `ansible/ansible.cfg` (6.5). Create `ansible/lint/ws_secret_no_log.py`, `.ansible-lint`, `.yamllint`, `.gitleaks.toml`, `tests/secrets-sentinel.sh`, `tests/roles/sentinel_leak/`; wire into `ci.yml` and `host.yml` | sentinel passes; negative control detected; lint passes | 1.5 |

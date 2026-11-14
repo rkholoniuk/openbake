@@ -36,7 +36,7 @@ FROM os AS ansible
 ARG ANSIBLE_CORE_VERSION=2.21.6
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    apt-get install -y --no-install-recommends python3-venv
+    apt-get update && apt-get install -y --no-install-recommends python3-venv
 RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m venv /opt/ansible/venv \
  && /opt/ansible/venv/bin/pip install "ansible-core==${ANSIBLE_CORE_VERSION}"
@@ -159,14 +159,25 @@ USER user
 # Test stages (not images). Run with `make lint` and `make check PROFILE=...`.
 # ---------------------------------------------------------------------------
 
-# lint: ansible-core from the ansible stage plus ansible-lint and yamllint.
+# actionlint (GitHub workflow linter), pinned by version and sha256 per arch.
+FROM os AS actionlint-amd64
+ADD --checksum=sha256:8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8 \
+    https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz /tmp/actionlint.tgz
+FROM os AS actionlint-arm64
+ADD --checksum=sha256:325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805afff0c6 \
+    https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_arm64.tar.gz /tmp/actionlint.tgz
+FROM actionlint-${TARGETARCH} AS actionlint
+RUN tar -xzf /tmp/actionlint.tgz -C /usr/local/bin actionlint
+
+# lint: ansible-core from the ansible stage plus ansible-lint, yamllint, actionlint, shellcheck.
 # `make lint` runs this image with the repo mounted read-only.
 FROM ansible AS lint
 ARG ANSIBLE_LINT_VERSION=26.11.0
 ARG YAMLLINT_VERSION=1.38.0
 RUN --mount=type=cache,target=/root/.cache/pip \
     /opt/ansible/venv/bin/pip install "ansible-lint==${ANSIBLE_LINT_VERSION}" "yamllint==${YAMLLINT_VERSION}" \
- && apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+ && apt-get update && apt-get install -y --no-install-recommends git shellcheck && rm -rf /var/lib/apt/lists/*
+COPY --from=actionlint /usr/local/bin/actionlint /usr/local/bin/actionlint
 ENV PATH=/opt/ansible/venv/bin:$PATH
 WORKDIR /src
 

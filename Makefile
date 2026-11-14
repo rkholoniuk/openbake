@@ -4,9 +4,10 @@
 #   make image                       build devbox, data and agent for this machine
 #   make image PROFILE=agent         build one image (or several: PROFILE="minimal agent")
 #   make smoke [PROFILE=devbox]      check images
-#   make lint                        yamllint, ansible-lint, ansible-playbook --syntax-check
+#   make lint                        yamllint, ansible-lint, --syntax-check, actionlint, shellcheck
 #   make check [PROFILE=devbox]      re-apply an image's roles with --check: must report changed=0
 #   make scan [PROFILE=devbox]       Trivy gate: fails on CRITICAL vulnerabilities with a fix, or secrets
+#   make ci [PROFILE=devbox]         everything CI runs, in the same order (lint image smoke check scan)
 #   make custom FROM=agent ROLES=hello_custom [VARS='{"hello_custom_packages":["htop"]}']
 #   make run-devbox                  code-server on http://127.0.0.1:13337 (PASSWORD=...)
 #   make run-data | run-agent        temporary until `make up` (M6)
@@ -25,7 +26,7 @@ export WS_REGISTRY WS_TAG
 ref = $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$(1):$(WS_TAG)
 
 .DEFAULT_GOAL := help
-.PHONY: help image smoke lint check scan custom run-devbox run-data run-agent prune-cache
+.PHONY: help image smoke lint check scan ci custom run-devbox run-data run-agent prune-cache
 
 # Roles per image, in layer order (replaced by ansible/profiles/*.yml in M2).
 ROLES_minimal := base,git
@@ -54,7 +55,20 @@ lint:
 	    echo "== ansible-playbook --syntax-check"; \
 	    ansible-playbook --syntax-check -i localhost, ansible/apply.yml -e ws_roles=base; \
 	    ansible-playbook --syntax-check -i localhost, tests/syntax-check.yml; \
-	    echo "== ansible-lint"; ansible-lint'
+	    echo "== ansible-lint"; ansible-lint; \
+	    echo "== actionlint"; actionlint; \
+	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh \
+	      ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info'
+
+# Same steps as .github/workflows/ci.yml; CI only adds runners, caching and the arch matrix.
+CI_PROFILES ?= minimal devbox data agent
+ci:
+	$(MAKE) lint
+	$(MAKE) image PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
+	$(MAKE) smoke PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
+	$(MAKE) check PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
+	$(MAKE) scan PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
+	$(if $(filter devbox,$(or $(PROFILE),$(CI_PROFILES))),$(MAKE) custom FROM=devbox ROLES=hello_custom && $(MAKE) smoke PROFILE=custom)
 
 # Builds the `check` stage on top of an existing image (build it first with make image).
 check:

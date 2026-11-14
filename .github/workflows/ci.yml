@@ -14,8 +14,10 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
-# Action versions are pinned to major tags for now; M3 pins them by commit SHA
-# and lets Renovate update them.
+# CI is a thin wrapper: every step is a make target that runs the same way
+# locally (`make ci` runs them all). Workflows only add runners, the arch
+# matrix and caching. Action versions are pinned to major tags for now; M3
+# pins them by commit SHA and lets Renovate update them.
 
 jobs:
   lint:
@@ -24,9 +26,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Bake file resolves
         run: docker buildx bake -f images/docker-bake.hcl --print minimal devbox data agent custom lint check scan > /dev/null
-      - name: shellcheck
-        run: shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info
-      # yamllint, ansible-playbook --syntax-check and ansible-lint, all inside the lint image.
+      # yamllint, --syntax-check, ansible-lint, actionlint and shellcheck, inside the lint image.
       - name: make lint
         run: make lint
 

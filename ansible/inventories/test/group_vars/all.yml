@@ -1,0 +1,5 @@
+---
+# Test settings for host-target roles (filled in with M5/M6).
+# The CI runner keeps its own SSH access: list its user so the hardening
+# preflight does not refuse to run.
+hardening_ssh_lockout_ok: []

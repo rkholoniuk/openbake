@@ -46,3 +46,9 @@ terraform.rc
 .state/
 .tools/
 *.env
+# Real inventories stay out of git (see ansible/inventories/README.md)
+ansible/inventories/*
+!ansible/inventories/README.md
+!ansible/inventories/local/
+!ansible/inventories/test/
+!ansible/inventories/example/

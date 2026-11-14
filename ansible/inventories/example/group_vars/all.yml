@@ -1,0 +1,4 @@
+---
+# Settings for every host in this environment. No secrets here.
+firewall_allow:
+  - { port: 22, proto: tcp, from: any, limit: true }
