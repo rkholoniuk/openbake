@@ -70,7 +70,7 @@ ci:
 	$(MAKE) scan PROFILE="$(or $(PROFILE),$(CI_PROFILES))"
 	$(if $(filter devbox,$(or $(PROFILE),$(CI_PROFILES))),$(MAKE) custom FROM=devbox ROLES=hello_custom && $(MAKE) smoke PROFILE=custom)
 
-# Builds the `check` stage on top of an existing image (build it first with make image).
+# Builds the `check` stage on top of the image stage (from the build cache: run make image first).
 check:
 	@for p in $(or $(PROFILE),minimal devbox data agent); do \
 	  roles="$$(case $$p in minimal) echo '$(ROLES_minimal)';; devbox) echo '$(ROLES_devbox)';; \

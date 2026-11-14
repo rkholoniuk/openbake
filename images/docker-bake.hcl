@@ -107,8 +107,8 @@ target "lint" {
 target "check" {
   inherits = ["_common"]
   target   = "check"
-  # Builds on the already-built image of WS_CUSTOM_FROM; the result is discarded.
-  contexts = { (WS_CUSTOM_FROM) = "docker-image://${image(WS_CUSTOM_FROM)}" }
+  # FROM the WS_CUSTOM_FROM stage: comes from the build cache, so it is the
+  # same filesystem as the image `make image` built. The result is discarded.
   args = {
     CUSTOM_FROM = WS_CUSTOM_FROM
     CHECK_ROLES = WS_CHECK_ROLES
