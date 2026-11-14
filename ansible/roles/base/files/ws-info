@@ -1,0 +1,7 @@
+#!/bin/sh
+# Print what this image contains (one JSON document per role, written at build time).
+set -eu
+for f in /etc/ws-image/*.json; do
+  [ -e "$f" ] || continue
+  cat "$f"
+done

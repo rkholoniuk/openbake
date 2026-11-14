@@ -1,0 +1,55 @@
+---
+- name: Create mise directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop:
+    - "{{ ws_download_cache }}/mise"
+    - /etc/mise
+
+- name: Download mise
+  ansible.builtin.get_url:
+    url: "{{ mise_url }}"
+    dest: "{{ ws_download_cache }}/mise/mise-{{ mise_version }}-{{ ws_arch.node }}"
+    checksum: "{{ mise_checksum | default(omit, true) }}"
+    mode: "0755"
+
+- name: Install mise binary
+  ansible.builtin.copy:
+    src: "{{ ws_download_cache }}/mise/mise-{{ mise_version }}-{{ ws_arch.node }}"
+    dest: /usr/local/bin/mise
+    remote_src: true
+    mode: "0755"
+
+- name: System-wide mise config (applies to every user)
+  ansible.builtin.copy:
+    dest: /etc/mise/config.toml
+    mode: "0644"
+    content: |
+      [tools]
+      python = {{ python_versions | to_json }}
+      node = {{ node_versions | to_json }}
+
+      [settings]
+      python.compile = false
+
+# MISE_CACHE_DIR sits on the BuildKit cache mount, so warm rebuilds reuse
+# the downloaded Python/Node archives.
+- name: Install Python and Node versions
+  ansible.builtin.command: mise install --yes
+  environment: "{{ {'MISE_DATA_DIR': mise_data_dir, 'MISE_CACHE_DIR': ws_download_cache ~ '/mise/cache', 'MISE_YES': '1'} | combine(runtimes_mise_env) }}"
+  changed_when: true
+
+- name: Create shims
+  ansible.builtin.command: mise reshim
+  environment:
+    MISE_DATA_DIR: "{{ mise_data_dir }}"
+  changed_when: true
+
+- name: Let the workspace user add versions later
+  ansible.builtin.file:
+    path: "{{ mise_data_dir }}"
+    owner: "{{ ws_user }}"
+    group: "{{ ws_user }}"
+    recurse: true

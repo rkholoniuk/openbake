@@ -1,0 +1,14 @@
+---
+# Pin a release (e.g. "v0.11.5") for reproducible builds; "stable" follows upstream.
+neovim_version: stable
+neovim_url: "https://github.com/neovim/neovim/releases/download/{{ neovim_version }}/nvim-linux-{{ ws_arch.gnu }}.tar.gz"
+neovim_checksum: ""
+
+# What LazyVim and its plugins expect to find.
+neovim_packages: [ripgrep, fd-find, fzf, build-essential, unzip, git, curl]
+
+neovim_lazyvim: true
+neovim_lazyvim_repo: https://github.com/LazyVim/starter
+neovim_lazyvim_ref: main
+# Pre-install plugins at build time so the first start is instant.
+neovim_lazyvim_sync: true

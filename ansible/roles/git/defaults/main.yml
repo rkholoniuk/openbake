@@ -1,0 +1,17 @@
+---
+git_packages: [git, git-lfs, openssh-client, gnupg]
+
+# System-wide /etc/gitconfig.
+git_system_config:
+  init.defaultBranch: main
+  pull.ff: only
+  core.autocrlf: input
+  fetch.prune: "true"
+
+# Where SSH host keys for GitHub/GitLab come from:
+#   github_meta  fetch GitHub's published keys over HTTPS (api.github.com/meta)
+#   static       use git_known_hosts_static only
+#   none         ship no known_hosts (users get the normal first-connect prompt)
+# We never disable StrictHostKeyChecking.
+git_known_hosts_source: github_meta
+git_known_hosts_static: []

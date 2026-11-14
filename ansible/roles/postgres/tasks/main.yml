@@ -1,0 +1,35 @@
+---
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: "{{ postgres_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+# The package creates a root-managed cluster for systemd. A workspace has no
+# systemd and runs as the user, so drop it and use ws-postgres instead.
+- name: Remove the packaged cluster
+  ansible.builtin.shell: |
+    set -eu
+    for c in $(pg_lsclusters -h | awk '{print $1"/"$2}'); do
+      pg_dropcluster --stop "${c%/*}" "${c#*/}"
+    done
+  args:
+    executable: /bin/bash
+  changed_when: true
+
+- name: Install ws-postgres
+  ansible.builtin.copy:
+    src: ws-postgres
+    dest: /usr/local/bin/ws-postgres
+    mode: "0755"
+
+- name: Record role in image manifest
+  ansible.builtin.shell: |
+    set -eu
+    bin=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)
+    printf '{"role":"postgres","postgres":"%s"}\n' "$("$bin/postgres" --version | awk '{print $3}')" > /etc/ws-image/postgres.json
+  args:
+    executable: /bin/bash
+  changed_when: true

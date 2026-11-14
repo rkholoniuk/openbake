@@ -1,0 +1,79 @@
+---
+- name: Install base packages
+  ansible.builtin.apt:
+    name: "{{ base_packages + base_extra_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Check for the stock ubuntu user (uid 1000 in official images)
+  ansible.builtin.getent:
+    database: passwd
+    key: ubuntu
+    fail_key: false
+
+- name: Remove the stock ubuntu user so our user can take uid 1000
+  ansible.builtin.user:
+    name: ubuntu
+    state: absent
+    remove: true
+  when: ansible_facts.getent_passwd.ubuntu is not none
+
+- name: Create workspace group
+  ansible.builtin.group:
+    name: "{{ ws_user }}"
+    gid: "{{ ws_uid }}"
+
+- name: Create workspace user
+  ansible.builtin.user:
+    name: "{{ ws_user }}"
+    uid: "{{ ws_uid }}"
+    group: "{{ ws_user }}"
+    home: "{{ ws_home }}"
+    shell: /bin/bash
+    create_home: true
+
+- name: Passwordless sudo for the workspace user
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/90-ws-user
+    content: "{{ ws_user }} ALL=(ALL) NOPASSWD:ALL\n"
+    mode: "0440"
+    validate: visudo -cf %s
+  when: base_passwordless_sudo | bool
+
+- name: Create workspace directory
+  ansible.builtin.file:
+    path: "{{ ws_workspace }}"
+    state: directory
+    owner: "{{ ws_user }}"
+    group: "{{ ws_user }}"
+    mode: "0755"
+
+- name: Create image manifest directory
+  ansible.builtin.file:
+    path: /etc/ws-image
+    state: directory
+    mode: "0755"
+
+- name: Install ws-init (first-start home seeding) and ws-info
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    mode: "0755"
+  loop: [ws-init, ws-info]
+
+- name: Login-shell PATH for tools installed under /opt
+  ansible.builtin.copy:
+    dest: /etc/profile.d/ws.sh
+    mode: "0644"
+    content: |
+      export MISE_DATA_DIR=/opt/mise
+      case ":$PATH:" in *":/opt/mise/shims:"*) ;; *) PATH="/opt/mise/shims:/opt/agents/bin:$PATH" ;; esac
+      export PATH
+
+- name: Record role in image manifest
+  ansible.builtin.copy:
+    dest: /etc/ws-image/base.json
+    mode: "0644"
+    content: "{{ {'role': 'base', 'distro': ansible_facts.distribution ~ ' ' ~ ansible_facts.distribution_version, 'arch': ansible_facts.architecture, 'user': ws_user, 'uid': ws_uid} | to_nice_json }}\n"

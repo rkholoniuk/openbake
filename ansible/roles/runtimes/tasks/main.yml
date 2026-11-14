@@ -1,0 +1,48 @@
+---
+- name: Check installer choice
+  ansible.builtin.assert:
+    that: runtimes_installer in ['mise', 'system']
+    fail_msg: "runtimes_installer must be 'mise' or 'system', got '{{ runtimes_installer }}'"
+    quiet: true
+
+- name: Install with mise
+  ansible.builtin.include_tasks: mise.yml
+  when: runtimes_installer == 'mise'
+
+- name: Install from distro packages
+  ansible.builtin.include_tasks: system.yml
+  when: runtimes_installer == 'system'
+
+# uv comes from PyPI on both paths: one wheel, no GitHub download.
+- name: Install python3-venv for the uv venv
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install uv into /opt/uv
+  ansible.builtin.shell: |
+    set -eu
+    python3 -m venv /opt/uv
+    /opt/uv/bin/pip install --quiet "uv=={{ uv_version }}"
+    ln -sf /opt/uv/bin/uv /usr/local/bin/uv
+    ln -sf /opt/uv/bin/uvx /usr/local/bin/uvx
+  args:
+    executable: /bin/bash
+    creates: /opt/uv/bin/uv
+
+- name: Record role in image manifest
+  ansible.builtin.shell: |
+    set -eu
+    export PATH="{{ mise_data_dir }}/shims:$PATH" MISE_DATA_DIR="{{ mise_data_dir }}"
+    py=$( (python3 --version 2>&1 || true) | awk '{print $2}')
+    node=$( (node --version 2>/dev/null || echo none) )
+    printf '{"role":"runtimes","installer":"%s","python_default":"%s","python_versions":%s,"node_default":"%s","node_versions":%s,"uv":"%s"}\n' \
+      "{{ runtimes_installer }}" "$py" '{{ python_versions | to_json }}' "$node" '{{ node_versions | to_json }}' \
+      "$(uv --version | awk '{print $2}')" > /etc/ws-image/runtimes.json
+    cat /etc/ws-image/runtimes.json
+  args:
+    executable: /bin/bash
+  changed_when: true

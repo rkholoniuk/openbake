@@ -1,0 +1,13 @@
+---
+code_server_version: "4.145.2"
+code_server_url: "https://github.com/coder/code-server/releases/download/v{{ code_server_version }}/code-server-{{ code_server_version }}-linux-{{ ws_arch.deb }}.tar.gz"
+code_server_checksum: ""
+
+code_server_port: 13337
+# none: put an authenticating proxy in front (the Platform router does this).
+# password: code-server's own login; the password is read from $PASSWORD at start.
+code_server_auth: password
+# Open VSX extension ids, installed at build time, e.g. [ms-python.python, esbenp.prettier-vscode]
+code_server_extensions: []
+# Outside $HOME so a home volume doesn't hide them.
+code_server_extensions_dir: /opt/code-server-extensions

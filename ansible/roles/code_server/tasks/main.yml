@@ -1,0 +1,91 @@
+---
+- name: Create download cache
+  ansible.builtin.file:
+    path: "{{ ws_download_cache }}/code-server"
+    state: directory
+    mode: "0755"
+
+- name: Download code-server
+  ansible.builtin.get_url:
+    url: "{{ code_server_url }}"
+    dest: "{{ ws_download_cache }}/code-server/code-server-{{ code_server_version }}-{{ ws_arch.deb }}.tar.gz"
+    checksum: "{{ code_server_checksum | default(omit, true) }}"
+    mode: "0644"
+
+- name: Create install directory
+  ansible.builtin.file:
+    path: "/opt/code-server-{{ code_server_version }}"
+    state: directory
+    mode: "0755"
+
+- name: Unpack code-server
+  ansible.builtin.unarchive:
+    src: "{{ ws_download_cache }}/code-server/code-server-{{ code_server_version }}-{{ ws_arch.deb }}.tar.gz"
+    dest: "/opt/code-server-{{ code_server_version }}"
+    remote_src: true
+    extra_opts: [--strip-components=1]
+
+- name: Link code-server onto PATH
+  ansible.builtin.file:
+    src: "/opt/code-server-{{ code_server_version }}/bin/code-server"
+    dest: /usr/local/bin/code-server
+    state: link
+
+- name: Create config and extensions directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    owner: "{{ item.owner }}"
+    group: "{{ item.owner }}"
+    mode: "0755"
+  loop:
+    - { path: /etc/code-server, owner: root }
+    - { path: "{{ code_server_extensions_dir }}", owner: "{{ ws_user }}" }
+
+- name: code-server config
+  ansible.builtin.copy:
+    dest: /etc/code-server/config.yaml
+    mode: "0644"
+    content: |
+      bind-addr: 0.0.0.0:{{ code_server_port }}
+      auth: {{ code_server_auth }}
+      cert: false
+      disable-telemetry: true
+      disable-update-check: true
+      extensions-dir: {{ code_server_extensions_dir }}
+
+- name: Install extensions
+  ansible.builtin.command: >-
+    code-server --extensions-dir {{ code_server_extensions_dir }} --install-extension {{ item }}
+  loop: "{{ code_server_extensions }}"
+  become: true
+  become_user: "{{ ws_user }}"
+  environment:
+    HOME: "{{ ws_home }}"
+  changed_when: true
+
+- name: Install ws-code-server launcher
+  ansible.builtin.copy:
+    dest: /usr/local/bin/ws-code-server
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # Start code-server on the workspace folder (port {{ code_server_port }}).
+      set -eu
+      {% if code_server_auth == 'password' %}
+      if [ -z "${PASSWORD:-}" ]; then
+        echo "ws-code-server: set PASSWORD (auth: password)" >&2
+        exit 1
+      fi
+      {% endif %}
+      exec code-server --config /etc/code-server/config.yaml "${WS_WORKSPACE:-$HOME/workspace}"
+
+- name: Record role in image manifest
+  ansible.builtin.shell: |
+    set -eu
+    printf '{"role":"code_server","code_server":"%s","port":%s,"auth":"%s","extensions":%s}\n' \
+      "{{ code_server_version }}" "{{ code_server_port }}" "{{ code_server_auth }}" \
+      '{{ code_server_extensions | to_json }}' > /etc/ws-image/code_server.json
+  args:
+    executable: /bin/bash
+  changed_when: true

@@ -1,0 +1,79 @@
+#!/bin/bash
+# ws-sample-data start [--foreground] | materialize | stop | status
+#
+# Runs the Streamlit + Dagster sample against the workspace's own Postgres:
+#   Dagster UI   http://localhost:{{ data_sample_dagster_port }}
+#   Streamlit    http://localhost:{{ data_sample_streamlit_port }}
+set -euo pipefail
+
+project="${WS_WORKSPACE:-$HOME/workspace}/{{ data_sample_name }}"
+[ -d "$project" ] || project="{{ data_sample_src }}"
+run_dir="$HOME/.local/state/ws-sample-data"
+mkdir -p "$run_dir"
+
+export PATH="{{ data_sample_venv }}/bin:$PATH"
+export WS_PG_DATABASES="analytics,dagster"
+export DATABASE_URL="${DATABASE_URL:-$(ws-postgres url analytics)}"
+export DAGSTER_HOME="${DAGSTER_HOME:-$HOME/.dagster}"
+export DAGSTER_PG_HOST=localhost DAGSTER_PG_DB=dagster
+export DAGSTER_PG_USERNAME="$(id -un)" DAGSTER_PG_PASSWORD="${WS_PG_PASSWORD:-dev}"
+
+prepare() {
+  ws-postgres start
+  mkdir -p "$DAGSTER_HOME"
+  [ -f "$DAGSTER_HOME/dagster.yaml" ] || cp "$project/dagster.yaml" "$DAGSTER_HOME/dagster.yaml"
+  cd "$project"
+}
+
+stop_all() {
+  for name in streamlit dagster; do
+    if [ -f "$run_dir/$name.pid" ]; then
+      kill "$(cat "$run_dir/$name.pid")" 2>/dev/null || true
+      rm -f "$run_dir/$name.pid"
+    fi
+  done
+}
+
+case "${1:-}" in
+start)
+  prepare
+  dagster dev -m pipeline.definitions -h 0.0.0.0 -p {{ data_sample_dagster_port }} \
+    > "$run_dir/dagster.log" 2>&1 &
+  echo $! > "$run_dir/dagster.pid"
+  streamlit run app/streamlit_app.py --server.address 0.0.0.0 \
+    --server.port {{ data_sample_streamlit_port }} --server.headless true \
+    --browser.gatherUsageStats false > "$run_dir/streamlit.log" 2>&1 &
+  echo $! > "$run_dir/streamlit.pid"
+  echo "Dagster   http://localhost:{{ data_sample_dagster_port }}  (log: $run_dir/dagster.log)"
+  echo "Streamlit http://localhost:{{ data_sample_streamlit_port }}  (log: $run_dir/streamlit.log)"
+  if [ "${2:-}" = "--foreground" ]; then
+    trap 'stop_all; ws-postgres stop; exit 0' TERM INT
+    wait -n || true
+    echo "a sample process exited; see $run_dir/*.log" >&2
+    stop_all
+    exit 1
+  fi
+  ;;
+materialize)
+  prepare
+  dagster asset materialize --select '*' -m pipeline.definitions
+  ;;
+stop)
+  stop_all
+  ws-postgres stop || true
+  ;;
+status)
+  ws-postgres status || true
+  for name in dagster streamlit; do
+    if [ -f "$run_dir/$name.pid" ] && kill -0 "$(cat "$run_dir/$name.pid")" 2>/dev/null; then
+      echo "$name running"
+    else
+      echo "$name stopped"
+    fi
+  done
+  ;;
+*)
+  echo "usage: ws-sample-data start [--foreground] | materialize | stop | status" >&2
+  exit 2
+  ;;
+esac
