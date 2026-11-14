@@ -5,7 +5,7 @@
 
 ## 1. Overview
 
-OpenBake is one open-source repository (MIT, see `LICENSE`). With **Docker, make and git**
+OpenBake is one open-source repository (Apache-2.0, see `LICENSE` and `NOTICE`). With **Docker, make and git**
 installed, a developer can:
 
 1. **bake workspace images** whose contents are defined by Ansible roles;
@@ -117,7 +117,7 @@ Copy `ansible/inventory/sample/` to `ansible/inventory/mylab/`, add hosts, then
 
 ```text
 openbake/
-├── README.md  LICENSE  SECURITY.md  CONTRIBUTING.md  .gitignore (.state/ .tools/)
+├── README.md  LICENSE  NOTICE  SECURITY.md  CONTRIBUTING.md  .gitignore (.state/ .tools/)
 ├── .ansible-lint  .yamllint  .gitleaks.toml
 ├── Makefile                 # image smoke custom up stop down ls shell password host
 ├── bootstrap.sh             # NATIVE=1 tools: uv → .tools/venv (ansible-core, PyYAML); OpenTofu → .tools/bin
@@ -608,7 +608,11 @@ fallback for.
 | 2026-11-14 | Docker is the only user prerequisite; every tool runs in the runner; `NATIVE=1` opt-out | owner, in the design session |
 | 2026-11-14 | A malware (antivirus) scan is part of image checks | owner, in the design session |
 | 2026-11-14 | Runner never used to configure the local machine directly; SSH back instead | design, from review round 2 |
-| 2026-11-14 | Project name OpenBake; repo `rkh0x7EA/openbake`; MIT license (as created) | owner |
+| 2026-11-14 | Project name OpenBake; repo `rkh0x7EA/openbake` | owner |
+| 2026-11-14 | D4: license Apache-2.0 (explicit patent grant), replacing the MIT file the repo was created with | owner |
+| 2026-11-14 | D2: registry GHCR, `ghcr.io/rkh0x7ea/openbake/ws-<profile>` | owner |
+| 2026-11-14 | D3: `make up` prefers a `ws-<p>:local` image when one exists | owner |
+| 2026-11-14 | D5: copy the spike without history (T1) | owner |
 
 ## Detailed Implementation Plan
 
@@ -648,8 +652,4 @@ default.
 
 ## Open decisions
 
-| # | Decision | Proposal |
-|---|---|---|
-| D2 | Registry | GHCR: `ghcr.io/rkh0x7ea/openbake/ws-<profile>` |
-| D3 | `make up` when a `:local` image exists | prefer `:local` |
-| D4 | License | repo was created with MIT; the earlier design assumed Apache-2.0 (explicit patent grant). Keep MIT unless the patent grant matters |
+None. D1-D5 are recorded in the decision log (section 12).

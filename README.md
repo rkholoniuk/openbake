@@ -15,4 +15,4 @@ Status: design. Nothing is implemented yet.
 
 - [Phase 1 design](docs/design/phase1-design.md)
 
-License: MIT.
+License: [Apache-2.0](LICENSE).
