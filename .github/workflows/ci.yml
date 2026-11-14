@@ -42,6 +42,15 @@ jobs:
       # Mounted as a BuildKit secret (raises GitHub's API rate limit for mise); never in a layer.
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      # Four ~2 GB images plus the BuildKit cache don't fit in the runner's free
+      # space; drop preinstalled toolchains we never use (~25 GB).
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift
+          sudo docker image prune --all --force > /dev/null
+          df -h /
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
       # Exposes the cache service variables to `run:` steps for type=gha caching.

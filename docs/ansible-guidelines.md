@@ -45,6 +45,38 @@ Rules for every role in `ansible/roles/` and `custom/roles/`. CI enforces what i
     get `check_mode: false`, otherwise they are skipped and the next task breaks.
   - `command`/`shell` tasks that change things are skipped in check mode; guard them with
     `creates:`/`removes:` or a probe, so check mode can still predict the change.
+- `command`/`shell` tasks: **probe, then act.** A read-only probe (`changed_when: false`,
+  `check_mode: false`) records state; the action runs only `when:` the probe says it is needed:
+
+  ```yaml
+  - name: Read installed version
+    ansible.builtin.command: /usr/local/bin/tool version
+    register: tool_version
+    changed_when: false
+    check_mode: false
+
+  - name: Upgrade when behind
+    ansible.builtin.command: /usr/local/bin/tool upgrade {{ tool_wanted }}
+    when: tool_wanted not in tool_version.stdout
+  ```
+- `creates:`/`removes:` only when the file reliably marks *completed* work (written last, not a
+  marker a half-finished run could leave behind).
+- Parse documented exit codes or structured output, never prose. Keep the allowed set narrow and
+  comment non-standard codes. Write the expression without `{{ }}`; list items are ANDed, so
+  write OR as one expression:
+
+  ```yaml
+    register: migrate
+    changed_when: migrate.rc == 2          # tool exits 2 when it applied migrations
+    failed_when: migrate.rc not in [0, 2]
+  ```
+- Anti-patterns, rejected in review: `changed_when: false` on a task that changes state (use a
+  module such as `lineinfile`/`copy`); `failed_when: false` or `ignore_errors: true` to silence
+  failures (allow specific codes instead); `changed_when: true` (it doesn't make a task safe to
+  repeat); handlers triggered by matching reworded output (use checksums or a state query);
+  `shell` where `command` works (only pipes, redirection or globs need `shell`).
+- Check mode is a preview. The proof of idempotence is a real second run with `changed=0`
+  (`tests/idempotence.sh`, M4).
 - Downloads use `get_url`/`unarchive` with a `checksum:` from `versions.yml` (enforced by
   `scripts/check-pins.py` from M3). No moving versions (`latest`, `stable`, `main`) in defaults.
 - apt tasks may use `cache_valid_time`; `apply.yml` refreshes empty package lists first (BuildKit

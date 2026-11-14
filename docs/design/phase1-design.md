@@ -113,6 +113,21 @@ then `make host PROFILE=hardened-server INVENTORY=ansible/inventories/mylab`.
 
 ## 6. Technical design
 
+### 6.0 Tool split: OpenTofu provisions, Ansible configures
+
+- **OpenTofu** owns things that are *created and destroyed*: workspace containers and volumes
+  (phase 1), later VMs, networks, Kubernetes namespaces and cloud resources. It keeps state, and
+  drift is shown with `tofu plan -refresh-only`.
+- **Ansible** owns what runs *inside* them: packages, config files, users, services, in images
+  (`ws_target=image`) and on machines (`ws_target=host`). It is stateless and idempotent; drift is
+  shown with `ansible-playbook --check --diff`.
+- **Hand-off** (when templates create machines, phase 2+): OpenTofu outputs render an inventory
+  with `local_file` into `ansible/inventories/<env>/` (git-ignored); `make host` runs against it
+  after `wait_for_connection` (no fixed sleeps). No `local-exec`/remote-exec provisioners running
+  Ansible from inside OpenTofu.
+- **Immutable path:** the same roles bake images (Docker now, Packer AMIs later) that OpenTofu
+  deploys unchanged. Prefer it over configuring long-lived machines where possible.
+
 ### 6.1 Repository layout
 
 ```text
@@ -562,8 +577,18 @@ image, which the anchors above cover. `NATIVE=1` avoids the runner entirely.
 
 ## 9. Later (separate small designs)
 
-1. Kubernetes template on k3d.
+1. Kubernetes template on k3d (local, decision 2026-11-12). **Remote Kubernetes** follows the
+   same split as 6.0: OpenTofu creates cloud resources (VMs, load balancers, DNS); Ansible
+   prepares nodes (packages, swap off, kernel modules, sysctl, firewall), installs RKE2 (first
+   server initialises, others join via port 9345, join token from the env file), and installs
+   cert-manager and Rancher with `kubernetes.core.helm`; Rancher API calls use `uri` with a bearer
+   token. Gaps in the reference write-up we must not copy: unguarded `swapoff`, `curl | bash`
+   installers (use pinned, checksummed downloads), non-idempotent API POSTs (probe first),
+   date-stamped resource names that change every run.
 2. Compose.
+2a. **Scheduled drift checks:** a nightly job runs `make host … CHECK=1` (`--check --diff`)
+    against the `test` inventory and `tofu plan -refresh-only` against workspaces, and opens an
+    issue when either reports changes (same dedupe as the nightly re-scan in 6.6).
 3. Packer: one AWS AMI from a host profile.
 4. Live installs through prebuilt signed role layers or a scanning package mirror.
 5. Control plane, UI, accounts and roles (Coder-like): templates with versions and presets,
@@ -615,6 +640,7 @@ fallback for.
 | 2026-11-14 | D3: `make up` prefers a `ws-<p>:local` image when one exists | owner |
 | 2026-11-14 | Inventories per environment under `ansible/inventories/` (`local`, `test`, `example` committed; real ones git-ignored) | owner |
 | 2026-11-14 | Dedicated automation account for host runs (`automation_account` role, opt-in bootstrap); `become` per task or block, not per play | owner |
+| 2026-11-14 | Tool split (6.0): OpenTofu provisions, Ansible configures; inventories generated from OpenTofu outputs; remote Kubernetes via Ansible-installed RKE2 + Rancher | owner |
 | 2026-11-14 | Testing: lint (yamllint, ansible-lint, syntax check, actionlint, shellcheck), `--check` replay on built images, Trivy gate; CI is a thin wrapper over `make ci` | owner |
 | 2026-11-14 | D5: copy the spike without history (T1) | owner |
 
