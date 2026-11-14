@@ -12,8 +12,9 @@ built and in which order.
   that calls it. `make ci` must keep running the same steps as `.github/workflows/ci.yml`.
 - **Ansible:** follow [docs/ansible-guidelines.md](docs/ansible-guidelines.md), especially
   idempotence, check mode and the secrets rules.
-- **Pin everything:** versions plus sha256 for downloads, exact versions for Python/npm tools,
-  and no moving tags (`latest`, `stable`, `main`). Never use the `aquasecurity/trivy-action` or
+- **Pin everything:** GitHub Actions by full commit SHA (with the version in a comment),
+  versions plus sha256 for downloads, exact versions for Python/npm tools, and no moving tags
+  (`latest`, `stable`, `main`). Never use the `aquasecurity/trivy-action` or
   `setup-trivy` Actions (CVE-2026-33634).
 - **Secrets:** never in build args, `WS_*` variables, role defaults, logs or commits.
 - **Design changes:** update [docs/design/phase1-design.md](docs/design/phase1-design.md) in the

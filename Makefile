@@ -57,6 +57,8 @@ lint:
 	    ansible-playbook --syntax-check -i localhost, tests/syntax-check.yml; \
 	    echo "== ansible-lint"; ansible-lint; \
 	    echo "== actionlint"; actionlint; \
+	    echo "== actions pinned to commit SHAs"; \
+	    ! grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; \
 	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh \
 	      ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info'
 

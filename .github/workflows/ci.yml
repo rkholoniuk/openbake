@@ -16,14 +16,15 @@ concurrency:
 
 # CI is a thin wrapper: every step is a make target that runs the same way
 # locally (`make ci` runs them all). Workflows only add runners, the arch
-# matrix and caching. Action versions are pinned to major tags for now; M3
-# pins them by commit SHA and lets Renovate update them.
+# matrix and caching. Every action is pinned to a full commit SHA (tags can be
+# moved, see CVE-2026-33634); `make lint` rejects unpinned `uses:` lines.
+# Renovate (M3) proposes updates.
 
 jobs:
   lint:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
       - name: Bake file resolves
         run: docker buildx bake -f images/docker-bake.hcl --print minimal devbox data agent custom lint check scan > /dev/null
       # yamllint, --syntax-check, ansible-lint, actionlint and shellcheck, inside the lint image.
@@ -51,10 +52,10 @@ jobs:
             /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift
           sudo docker image prune --all --force > /dev/null
           df -h /
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
       # Exposes the cache service variables to `run:` steps for type=gha caching.
-      - uses: crazy-max/ghaction-github-runtime@v3
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487  # v4.0.0
 
       - name: Build images
         run: |
