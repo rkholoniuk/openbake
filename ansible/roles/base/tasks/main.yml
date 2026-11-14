@@ -76,4 +76,7 @@
   ansible.builtin.copy:
     dest: /etc/ws-image/base.json
     mode: "0644"
-    content: "{{ {'role': 'base', 'distro': ansible_facts.distribution ~ ' ' ~ ansible_facts.distribution_version, 'arch': ansible_facts.architecture, 'user': ws_user, 'uid': ws_uid} | to_nice_json }}\n"
+    content: >
+      {{ {'role': 'base',
+          'distro': ansible_facts.distribution ~ ' ' ~ ansible_facts.distribution_version,
+          'arch': ansible_facts.architecture, 'user': ws_user, 'uid': ws_uid} | to_nice_json }}

@@ -12,7 +12,8 @@
   changed_when: false
 
 - name: System git config
-  ansible.builtin.command: git config --system {{ item.key | quote }} {{ item.value | quote }}
+  # community.general.git_config would add a collection; images use ansible-core only.
+  ansible.builtin.command: git config --system {{ item.key | quote }} {{ item.value | quote }}  # noqa: command-instead-of-module
   loop: "{{ git_system_config | dict2items }}"
   changed_when: false
 
@@ -21,6 +22,8 @@
     url: https://api.github.com/meta
     return_content: true
   register: git_github_meta
+  # Read-only GET: also run it in check mode, the next task needs the result.
+  check_mode: false
   when: git_known_hosts_source == 'github_meta'
 
 - name: Write /etc/ssh/ssh_known_hosts

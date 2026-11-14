@@ -1,0 +1,10 @@
+---
+# Accepted Trivy findings for `make scan`. Every entry needs a reason and an
+# expiry no more than 30 days out (enforced by security/check-ignores.py in M9).
+#
+# vulnerabilities:
+#   - id: CVE-2026-12345
+#     statement: "not reachable: the vulnerable code path is only used by X"
+#     expired_at: 2026-12-14
+vulnerabilities: []
+secrets: []

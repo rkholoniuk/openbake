@@ -1,6 +1,7 @@
 ---
 code_server_version: "4.145.2"
-code_server_url: "https://github.com/coder/code-server/releases/download/v{{ code_server_version }}/code-server-{{ code_server_version }}-linux-{{ ws_arch.deb }}.tar.gz"
+code_server_release_base: "https://github.com/coder/code-server/releases/download"
+code_server_url: "{{ code_server_release_base }}/v{{ code_server_version }}/code-server-{{ code_server_version }}-linux-{{ ws_arch.deb }}.tar.gz"
 code_server_checksum: ""
 
 code_server_port: 13337

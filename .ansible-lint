@@ -1,0 +1,20 @@
+---
+# Start at the "moderate" profile while the spike roles are cleaned up (M4),
+# then raise to "production".
+profile: moderate
+offline: true
+exclude_paths:
+  - .git/
+  - .github/
+  - .state/
+  - .tools/
+  - ansible/roles/data_sample/files/
+  - docs/
+# Role directories for the checker (apply.yml loads roles dynamically).
+kinds:
+  - playbook: "ansible/apply.yml"
+  - playbook: "tests/syntax-check.yml"
+# Spike variable names (python_versions, mise_*, uv_version) are renamed when
+# versions.yml lands (M3); until then this rule only warns.
+warn_list:
+  - var-naming[no-role-prefix]

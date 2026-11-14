@@ -42,7 +42,7 @@
     - { path: /etc/code-server, owner: root }
     - { path: "{{ code_server_extensions_dir }}", owner: "{{ ws_user }}" }
 
-- name: code-server config
+- name: Configure code-server
   ansible.builtin.copy:
     dest: /etc/code-server/config.yaml
     mode: "0644"

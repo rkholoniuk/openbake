@@ -11,6 +11,8 @@
 # real machines (ws_target=host, see docs/design/phase1-design.md 6.3).
 
 ARG BASE_IMAGE=ubuntu:24.04
+# Set by BuildKit; used to pick per-architecture downloads (scan stage).
+ARG TARGETARCH
 # Global so the `custom` stage can start FROM any curated stage (minimal, devbox, data, agent).
 ARG CUSTOM_FROM=devbox
 
@@ -152,3 +154,61 @@ RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     test -n "${CUSTOM_ROLES}" || { echo "CUSTOM_ROLES is empty" >&2; exit 1; }; \
     ANSIBLE_ROLES_PATH=/opt/custom-roles:/opt/roles /opt/ansible/apply.sh "${CUSTOM_ROLES}" -e ws_target=image
 USER user
+
+# ---------------------------------------------------------------------------
+# Test stages (not images). Run with `make lint` and `make check PROFILE=...`.
+# ---------------------------------------------------------------------------
+
+# lint: ansible-core from the ansible stage plus ansible-lint and yamllint.
+# `make lint` runs this image with the repo mounted read-only.
+FROM ansible AS lint
+ARG ANSIBLE_LINT_VERSION=26.11.0
+ARG YAMLLINT_VERSION=1.38.0
+RUN --mount=type=cache,target=/root/.cache/pip \
+    /opt/ansible/venv/bin/pip install "ansible-lint==${ANSIBLE_LINT_VERSION}" "yamllint==${YAMLLINT_VERSION}" \
+ && apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+ENV PATH=/opt/ansible/venv/bin:$PATH
+WORKDIR /src
+
+# check: re-apply a finished image's roles in check mode (--check --diff).
+# A built image must already be in the state its roles describe, so the run
+# has to report changed=0. Catches roles that would change things on every
+# run, and roles that break in check mode (which `make host CHECK=1` relies on).
+FROM ${CUSTOM_FROM} AS check
+ARG CHECK_ROLES
+# Same role variables as the build (empty = role default).
+ARG WSV_GIT_KNOWN_HOSTS_SOURCE
+ARG WSV_RUNTIMES_INSTALLER
+ARG WSV_PYTHON_VERSIONS
+ARG WSV_NODE_VERSIONS
+ARG WSV_NEOVIM_VERSION
+ARG WSV_CODE_SERVER_VERSION
+ARG WSV_CODE_SERVER_EXTENSIONS
+ARG WSV_CODEX_VERSION
+ARG WSV_CLAUDE_CODE_VERSION
+USER root
+RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
+    --mount=type=bind,source=ansible/roles,target=/opt/roles \
+    --mount=type=bind,source=custom/roles,target=/opt/custom-roles \
+    --mount=type=bind,source=tests/check-mode.sh,target=/opt/check-mode.sh \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    --mount=type=cache,target=/var/cache/ws,sharing=locked \
+    --mount=type=cache,target=/root/.npm \
+    test -n "${CHECK_ROLES}" || { echo "CHECK_ROLES is empty" >&2; exit 1; }; \
+    ANSIBLE_ROLES_PATH=/opt/custom-roles:/opt/roles sh /opt/check-mode.sh "${CHECK_ROLES}"
+
+# scan: Trivy for the image gate (`make scan`). Version and sha256 are pinned
+# here (versions.yml from M3). Trivy's own release channel was compromised in
+# March 2026 (CVE-2026-33634), so we never use a moving tag or the
+# trivy-action/setup-trivy GitHub Actions; the release tarball is checked
+# against a checksum reviewed in this repo.
+FROM os AS trivy-amd64
+ADD --checksum=sha256:c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c39d9c0 \
+    https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-64bit.tar.gz /tmp/trivy.tgz
+FROM os AS trivy-arm64
+ADD --checksum=sha256:e174dff2a6dba5e3ae41f8d0537a6324405bd08132497340304c6b20e0f16a1f \
+    https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-ARM64.tar.gz /tmp/trivy.tgz
+FROM trivy-${TARGETARCH} AS scan
+RUN tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy && rm /tmp/trivy.tgz && trivy --version
+ENTRYPOINT ["trivy"]

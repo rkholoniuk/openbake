@@ -31,6 +31,7 @@ variable "WS_GIT_KNOWN_HOSTS_SOURCE" { default = "" }  # github_meta | static | 
 variable "WS_CUSTOM_FROM" { default = "devbox" }
 variable "WS_CUSTOM_ROLES" { default = "" }
 variable "WS_CUSTOM_VARS" { default = "" }          # JSON object of extra role variables
+variable "WS_CHECK_ROLES" { default = "" }          # roles to re-apply in check mode (make check)
 
 function "image" {
   params = [profile]
@@ -94,4 +95,29 @@ target "custom" {
     CUSTOM_ROLES    = WS_CUSTOM_ROLES
     WSV_CUSTOM_VARS = WS_CUSTOM_VARS
   }
+}
+
+# Tool and test stages (make lint, make check, make scan); not workspace images.
+target "lint" {
+  inherits = ["_common"]
+  target   = "lint"
+  tags     = [image("lint")]
+}
+
+target "check" {
+  inherits = ["_common"]
+  target   = "check"
+  # Builds on the already-built image of WS_CUSTOM_FROM; the result is discarded.
+  contexts = { (WS_CUSTOM_FROM) = "docker-image://${image(WS_CUSTOM_FROM)}" }
+  args = {
+    CUSTOM_FROM = WS_CUSTOM_FROM
+    CHECK_ROLES = WS_CHECK_ROLES
+  }
+  output = ["type=cacheonly"]
+}
+
+target "scan" {
+  inherits = ["_common"]
+  target   = "scan"
+  tags     = [image("scan")]
 }

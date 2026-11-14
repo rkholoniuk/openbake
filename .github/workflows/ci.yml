@@ -1,3 +1,4 @@
+---
 name: ci
 
 on:
@@ -22,9 +23,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Bake file resolves
-        run: docker buildx bake -f images/docker-bake.hcl --print minimal devbox data agent custom > /dev/null
+        run: docker buildx bake -f images/docker-bake.hcl --print minimal devbox data agent custom lint check scan > /dev/null
       - name: shellcheck
-        run: shellcheck images/smoke.sh ansible/apply.sh ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info
+        run: shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info
+      # yamllint, ansible-playbook --syntax-check and ansible-lint, all inside the lint image.
+      - name: make lint
+        run: make lint
 
   images:
     needs: lint
@@ -53,6 +57,14 @@ jobs:
 
       - name: Smoke
         run: make smoke PROFILE="minimal devbox data agent"
+
+      # Re-apply each image's roles with --check --diff: must report changed=0.
+      - name: Check mode
+        run: make check PROFILE="minimal devbox data agent"
+
+      # Gate: CRITICAL vulnerabilities with a fix available, and secrets in layers.
+      - name: Trivy scan
+        run: make scan PROFILE="minimal devbox data agent"
 
       - name: Custom image
         run: |
