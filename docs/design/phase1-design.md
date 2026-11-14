@@ -265,6 +265,16 @@ prerequisites.
 **`apply.sh`** uses `${WS_VENV:-$here/venv}`. **`ansible.cfg`** has a repo-relative `roles_path`
 and keeps `/opt/roles` for builds.
 
+**`make ping INVENTORY=…`** runs before any host change (and as the first step of `make host`):
+`ansible.builtin.ping` on every host, then a read-only connectivity probe per host: DNS
+resolution and outbound HTTPS to the hosts roles download from (`archive.ubuntu.com`,
+`github.com`, `registry.npmjs.org`, `pypi.org`), over IPv4 and, when the host has a global IPv6
+address, IPv6. Probes use `uri`/`command` with `changed_when: false`, `check_mode: false` and a
+narrow `failed_when`, so they never change a host. Results are collected per host with
+`set_fact` and written once (`run_once`, `delegate_to: localhost`) to
+`.state/reports/connectivity-<inventory>.json`, plus a one-line summary per host. `make host`
+stops early when a host is unreachable or can't reach a download source it needs.
+
 **`make host`** runs:
 ```
 ansible-playbook -i <INVENTORY or ansible/inventories/local> ansible/apply.yml \
@@ -640,6 +650,7 @@ fallback for.
 | 2026-11-14 | D3: `make up` prefers a `ws-<p>:local` image when one exists | owner |
 | 2026-11-14 | Inventories per environment under `ansible/inventories/` (`local`, `test`, `example` committed; real ones git-ignored) | owner |
 | 2026-11-14 | Dedicated automation account for host runs (`automation_account` role, opt-in bootstrap); `become` per task or block, not per play | owner |
+| 2026-11-14 | `make ping`: ping + connectivity report (DNS, HTTPS to download sources, IPv4/IPv6) before host runs | owner |
 | 2026-11-14 | Tool split (6.0): OpenTofu provisions, Ansible configures; inventories generated from OpenTofu outputs; remote Kubernetes via Ansible-installed RKE2 + Rancher | owner |
 | 2026-11-14 | Testing: lint (yamllint, ansible-lint, syntax check, actionlint, shellcheck), `--check` replay on built images, Trivy gate; CI is a thin wrapper over `make ci` | owner |
 | 2026-11-14 | D5: copy the spike without history (T1) | owner |
