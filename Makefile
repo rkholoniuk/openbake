@@ -13,6 +13,10 @@
 #   make custom FROM=agent ROLES=hello_custom [VARS='{"hello_custom_packages":["htop"]}']
 #   make run-devbox                  code-server on http://127.0.0.1:13337 (PASSWORD=...)
 #   make run-data | run-agent        temporary until `make up` (M6)
+#   make sandbox-up | sandbox-down   agent with no internet and no real credentials, behind a broker
+#   make sandbox-shell               shell in the sandboxed agent
+#   make sandbox-check               boundary tests: fails on any leak
+#                                    SANDBOX_RUNTIME=docker (default) | apple (Apple `container`, experimental)
 #
 # Images are ws-<profile>:$(WS_TAG). Build settings are WS_* variables, see
 # images/docker-bake.hcl, e.g.
@@ -33,7 +37,8 @@ export WS_REGISTRY WS_TAG
 ref = $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$(1):$(WS_TAG)
 
 .DEFAULT_GOAL := help
-.PHONY: help image smoke lint check check-ci scan ci refresh custom run-devbox run-data run-agent prune-cache
+.PHONY: help image smoke lint check check-ci scan ci refresh custom run-devbox run-data run-agent prune-cache \
+	sandbox-up sandbox-down sandbox-shell sandbox-check
 
 LINT_IMAGE    = $(call ref,lint)
 SCAN_IMAGE    = $(call ref,scan)
@@ -83,7 +88,8 @@ lint:
 	    if grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; then \
 	      echo "unpinned action(s) above: pin to a full commit SHA" >&2; exit 1; fi; \
 	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh .github/scripts/*.sh \
-	      ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info'
+	      ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info \
+	      sandbox/sandbox.sh sandbox/broker/entrypoint.sh'
 
 # check with the CI policy (blocking vs report-only), limited to PROFILE when given.
 CI_SELECTED = $(or $(PROFILE),$(CI_PROFILES))
@@ -160,6 +166,13 @@ run-data:
 run-agent:
 	docker run --rm -it -e ANTHROPIC_API_KEY -e OPENAI_API_KEY \
 	  -v ws-agent-home:/home/user $(call ref,agent)
+
+# Sandbox experiment (sandbox/): needs the agent image (make image PROFILE=agent)
+# and a credential in ~/.config/openbake/sandbox/secrets/llm_key (SANDBOX_STATE_DIR
+# moves that directory). See sandbox/sandbox.sh.
+SANDBOX_RUNTIME ?= docker
+sandbox-up sandbox-down sandbox-shell sandbox-check:
+	SANDBOX_RUNTIME=$(SANDBOX_RUNTIME) bash sandbox/sandbox.sh $(@:sandbox-%=%)
 
 # BuildKit keeps apt/npm/uv/download caches between builds; this clears them.
 prune-cache:

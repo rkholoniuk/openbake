@@ -42,6 +42,55 @@ Pick versions with `WS_*` variables (they are listed in
 WS_PYTHON_VERSIONS='["3.13","3.12"]' WS_NODE_VERSIONS='["24"]' make image PROFILE=devbox
 ```
 
+## Sandbox (experimental)
+
+Runs `ws-agent` with no internet and no real credentials. A second container, the broker, is the
+only way out: it forwards LLM API calls and adds the real key, which the agent never sees. See
+[`sandbox/`](sandbox/) and the [broker requirements draft](docs/design/broker-requirements.md).
+
+```sh
+make image PROFILE=agent
+mkdir -p ~/.config/openbake/sandbox/secrets
+# put an Anthropic API key, or the token from `claude setup-token`, in
+# ~/.config/openbake/sandbox/secrets/llm_key
+make sandbox-up
+make sandbox-check      # boundary tests: fails on any leak
+make sandbox-shell      # then: claude -p "say hi"
+make sandbox-down       # the agent's home volume is kept
+```
+
+Local state stays outside the repository, in `~/.config/openbake/sandbox/` (`SANDBOX_STATE_DIR`
+moves it): `secrets/llm_key` is the real credential, and `exchange/` is shared with the agent as
+`/exchange`, so treat its contents as untrusted. Only the Anthropic API is reachable today:
+package installs and Codex need the egress proxy that is still to come.
+
+### macOS: Apple `container` instead of Docker
+
+`SANDBOX_RUNTIME=apple` runs the agent and the broker with Apple's
+[`container`](https://github.com/apple/container), which gives each container its own lightweight
+VM. It needs Apple silicon and macOS 26. This backend is experimental (tested with `container`
+1.7.1 on macOS 26.3): trust `make sandbox-check`, not the fact that it started.
+
+1. Check the macOS version: `sw_vers -productVersion` must print 26 or later.
+2. Install `container`: download the signed `.pkg` from its
+   [releases page](https://github.com/apple/container/releases) and open it.
+3. Start its service once: `container system start`. Answer `Y` when it offers to install the
+   default Linux kernel.
+4. Build the agent image with Docker as usual (`make image PROFILE=agent`). `sandbox-up` copies it
+   from Docker into `container`.
+5. Run the sandbox:
+
+```sh
+make sandbox-up SANDBOX_RUNTIME=apple
+make sandbox-check SANDBOX_RUNTIME=apple
+make sandbox-shell SANDBOX_RUNTIME=apple
+make sandbox-down SANDBOX_RUNTIME=apple
+```
+
+Differences from the Docker backend: the internal network still lets the agent reach the Mac
+itself (Docker's does not), and there is no `no-new-privileges` option, so capabilities are
+dropped instead. Image builds, `make check` and `make scan` still need Docker.
+
 ## Keeping images patched
 
 A normal `make image` reuses cached layers, so it does **not** pick up new security updates.
@@ -76,6 +125,7 @@ steps.
 ansible/        apply.yml, apply.sh, ansible.cfg, roles/, profiles/ (one file per image/host setup)
 custom/roles/   your roles for `make custom`
 images/         Dockerfile, docker-bake.hcl, smoke.sh
+sandbox/        compose.yaml, sandbox.sh, broker/: agent without internet or real credentials
 docs/           design, guidelines, security policy
 ```
 

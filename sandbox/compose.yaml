@@ -1,0 +1,48 @@
+---
+# Local test: ws-agent with no internet and no real credentials.
+# The broker is the only way out and the only place the real API key exists.
+# Start it through make: sandbox.sh sets SANDBOX_STATE_DIR (default
+# ~/.config/openbake/sandbox), where the credential and the exchange folder live.
+#
+#   make image PROFILE=agent
+#   make sandbox-up && make sandbox-check && make sandbox-shell
+name: openbake-sandbox
+
+services:
+  agent:
+    image: ws-agent:local
+    command: ["sleep", "infinity"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]   # also disables sudo in the image
+    networks: [inner]
+    environment:
+      ANTHROPIC_BASE_URL: http://broker:8080
+      # Subscription mode: the real `claude setup-token` value lives in the broker.
+      # For an API key instead, replace this line with
+      #   ANTHROPIC_API_KEY: placeholder-real-key-lives-in-broker
+      CLAUDE_CODE_OAUTH_TOKEN: sk-ant-oat01-placeholder-real-token-lives-in-broker
+      CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+    volumes:
+      - home:/home/user
+      - ${SANDBOX_STATE_DIR:?start with make sandbox-up}/exchange:/exchange
+
+  broker:
+    build: ./broker
+    security_opt: ["no-new-privileges:true"]
+    networks: [inner, outer]
+    secrets: [llm_key]
+
+networks:
+  inner:
+    internal: true
+  outer: {}
+
+secrets:
+  llm_key:
+    file: ${SANDBOX_STATE_DIR:?start with make sandbox-up}/secrets/llm_key
+
+volumes:
+  home: {}

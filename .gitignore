@@ -56,3 +56,8 @@ ansible/inventories/*
 # Python bytecode
 __pycache__/
 *.pyc
+
+# sandbox local state now lives in ~/.config/openbake/sandbox; these catch the old location
+sandbox/secrets/
+sandbox/exchange/
+_to_delete/
