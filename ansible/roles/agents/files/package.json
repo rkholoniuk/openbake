@@ -1,0 +1,9 @@
+{
+  "name": "openbake-agents",
+  "private": true,
+  "description": "Coding-agent CLIs baked into OpenBake images (installed with npm ci --ignore-scripts).",
+  "dependencies": {
+    "@openai/codex": "0.167.1",
+    "@anthropic-ai/claude-code": "2.1.322"
+  }
+}

@@ -10,7 +10,10 @@
 # Every apply.sh call passes -e ws_target=image: roles behave differently on
 # real machines (ws_target=host, see docs/design/phase1-design.md 6.3).
 
-ARG BASE_IMAGE=ubuntu:24.04
+# Pinned by digest (multi-arch index, Docker Hub 2026-11-12). Bumped by a reviewed
+# commit (Renovate from M3); weekly `make refresh` still applies security updates
+# on top through `apt-get upgrade` in the os stage.
+ARG BASE_IMAGE=ubuntu:24.04@sha256:2198e4c65076e9cb0b3d695219df667c0e3b0072da64ca3c2648aca17dcecaf5
 # Set by BuildKit; used to pick per-architecture downloads (scan stage).
 ARG TARGETARCH
 # Global so the `custom` stage can start FROM any curated stage (minimal, devbox, data, agent).
@@ -36,14 +39,16 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
 # ansible: ansible-core in a venv; bind-mounted into later RUN steps only
 # ---------------------------------------------------------------------------
 FROM os AS ansible
-# 2.21 is the newest line that runs on Ubuntu 24.04's Python 3.12 (2.22 needs 3.13).
-ARG ANSIBLE_CORE_VERSION=2.21.6
+# ansible-core 2.21 is the newest line that runs on Ubuntu 24.04's Python 3.12
+# (2.22 needs 3.13). Every package is pinned by version and sha256, wheels only
+# (images/requirements/ansible.txt, generated from ansible.in).
 RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     apt-get update && apt-get install -y --no-install-recommends python3-venv
 RUN --mount=type=cache,target=/root/.cache/pip \
+    --mount=type=bind,source=images/requirements/ansible.txt,target=/tmp/ansible.txt \
     python3 -m venv /opt/ansible/venv \
- && /opt/ansible/venv/bin/pip install "ansible-core==${ANSIBLE_CORE_VERSION}"
+ && /opt/ansible/venv/bin/pip install --require-hashes --only-binary :all: -r /tmp/ansible.txt
 COPY ansible/ansible.cfg ansible/apply.yml ansible/apply.sh /opt/ansible/
 # Profiles are read by apply.yml (-e ws_profile=...). A profile edit rebuilds
 # every role layer; images rebuild weekly anyway, role edits still rebuild
@@ -135,8 +140,6 @@ CMD ["ws-sample-data", "start", "--foreground"]
 # agent: git, Python, Node, Codex, Claude Code
 # ---------------------------------------------------------------------------
 FROM runtimes AS agent
-ARG WSV_CODEX_VERSION
-ARG WSV_CLAUDE_CODE_VERSION
 RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=bind,source=ansible/roles/agents,target=/opt/roles/agents \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
@@ -181,13 +184,14 @@ ADD --checksum=sha256:325e971b6ba9bfa504672e29be93c24981eeb1c07576d730e9f7c8805a
 FROM actionlint-${TARGETARCH} AS actionlint
 RUN tar -xzf /tmp/actionlint.tgz -C /usr/local/bin actionlint
 
-# lint: ansible-core from the ansible stage plus ansible-lint, yamllint, actionlint, shellcheck.
+# lint: ansible-core from the ansible stage plus ansible-lint, yamllint, zizmor, actionlint, shellcheck.
 # `make lint` runs this image with the repo mounted read-only.
 FROM ansible AS lint
-ARG ANSIBLE_LINT_VERSION=26.11.0
-ARG YAMLLINT_VERSION=1.38.0
+# ansible-lint, yamllint, zizmor: pinned by version and sha256, wheels only
+# (images/requirements/lint.txt, generated from lint.in).
 RUN --mount=type=cache,target=/root/.cache/pip \
-    /opt/ansible/venv/bin/pip install "ansible-lint==${ANSIBLE_LINT_VERSION}" "yamllint==${YAMLLINT_VERSION}" \
+    --mount=type=bind,source=images/requirements/lint.txt,target=/tmp/lint.txt \
+    /opt/ansible/venv/bin/pip install --require-hashes --only-binary :all: -r /tmp/lint.txt \
  && apt-get update && apt-get install -y --no-install-recommends git shellcheck && rm -rf /var/lib/apt/lists/*
 COPY --from=actionlint /usr/local/bin/actionlint /usr/local/bin/actionlint
 ENV PATH=/opt/ansible/venv/bin:$PATH
@@ -207,8 +211,6 @@ ARG WSV_NODE_VERSIONS
 ARG WSV_NEOVIM_VERSION
 ARG WSV_CODE_SERVER_VERSION
 ARG WSV_CODE_SERVER_EXTENSIONS
-ARG WSV_CODEX_VERSION
-ARG WSV_CLAUDE_CODE_VERSION
 USER root
 RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=bind,source=ansible/roles,target=/opt/roles \
@@ -232,6 +234,18 @@ ADD --checksum=sha256:c7cbe3137fb8a48a17574bede3dd6beb16742d1e9772929940fc90082c
 FROM os AS trivy-arm64
 ADD --checksum=sha256:e174dff2a6dba5e3ae41f8d0537a6324405bd08132497340304c6b20e0f16a1f \
     https://github.com/aquasecurity/trivy/releases/download/v0.76.1/trivy_0.76.1_Linux-ARM64.tar.gz /tmp/trivy.tgz
+# OSV-Scanner: malicious-package (MAL-) gate for image contents and lockfiles,
+# which Trivy does not cover. Pinned by version and sha256 per arch.
+FROM os AS osv-amd64
+ADD --checksum=sha256:fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8 \
+    https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64 /usr/local/bin/osv-scanner
+FROM os AS osv-arm64
+ADD --checksum=sha256:983d22fbad9724514e3fcc6acc83b5fa64c5ffa6b0d9f510028f22c1b223ff81 \
+    https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_arm64 /usr/local/bin/osv-scanner
+FROM osv-${TARGETARCH} AS osv
+
 FROM trivy-${TARGETARCH} AS scan
 RUN tar -xzf /tmp/trivy.tgz -C /usr/local/bin trivy && rm /tmp/trivy.tgz && trivy --version
+COPY --from=osv /usr/local/bin/osv-scanner /usr/local/bin/osv-scanner
+RUN chmod 0755 /usr/local/bin/osv-scanner && osv-scanner --version
 ENTRYPOINT ["trivy"]

@@ -1,15 +1,22 @@
 ---
-# Which coding-agent CLIs to install. Both ship native binaries through npm.
+# Which coding-agent CLIs to put on PATH. Versions (and every transitive
+# dependency) come from files/package.json + files/package-lock.json:
+# update them with `npm install --package-lock-only --ignore-scripts` in
+# that directory, in a reviewed commit (Renovate from M3).
 agents: [codex, claude_code]
-
-codex_version: "0.167.1"
-claude_code_version: "2.1.322"
 
 agents_prefix: /opt/agents
 agents_node_min_major: 22          # Claude Code's npm package requires Node >= 22
 # ripgrep comes from cli_tools, jq from base.
 agents_packages: [git]
 
-agents_npm_packages:
-  codex: "@openai/codex@{{ codex_version }}"
-  claude_code: "@anthropic-ai/claude-code@{{ claude_code_version }}"
+# Lockfile entry and binary for each agent.
+agents_npm:
+  codex: { package: "@openai/codex", bin: codex }
+  claude_code: { package: "@anthropic-ai/claude-code", bin: claude }
+
+# npm ci runs with --ignore-scripts. Install scripts that are reviewed and
+# needed run explicitly afterwards (claude-code's install.cjs only copies its
+# native binary out of the platform package that the lockfile installed).
+agents_allowed_install_scripts:
+  - "@anthropic-ai/claude-code/install.cjs"

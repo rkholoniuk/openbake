@@ -15,6 +15,7 @@ neovim_packages: [fzf, build-essential, unzip, git, curl]
 
 neovim_lazyvim: true
 neovim_lazyvim_repo: https://github.com/LazyVim/starter
-neovim_lazyvim_ref: main
+# Commit of LazyVim/starter (2026-11-15), not a moving branch.
+neovim_lazyvim_ref: 803bc181d7c0d6d5eeba9274d9be49b287294d99
 # Pre-install plugins at build time so the first start is instant.
 neovim_lazyvim_sync: true

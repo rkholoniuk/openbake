@@ -9,10 +9,16 @@ node_versions: ["24", "22"]
 
 mise_version: "2026.11.6"
 mise_url: "https://github.com/jdx/mise/releases/download/v{{ mise_version }}/mise-v{{ mise_version }}-linux-{{ ws_arch.node }}"
-mise_checksum: ""            # e.g. "sha256:<hex>" to pin the binary
+# sha256 per version and architecture, from the release's SHASUMS256.txt.
+# A version without an entry fails instead of downloading unchecked.
+mise_checksums:
+  "2026.11.6":
+    x64: sha256:5fb74f80aab81e0a5ca20eb6414cc69b78ae0cab1deaeb521572ed26d8d4a6e3
+    arm64: sha256:85dc0c3514151f8c950745f9cafaec424dd7f13f379108fb60adb1402394a3c1
 mise_data_dir: /opt/mise
 # Extra environment for `mise install`, e.g. mirrors for air-gapped builds:
 #   MISE_NODE_MIRROR_URL: https://mirror.example.com/nodejs/
 runtimes_mise_env: {}
 
-uv_version: "0.13.7"          # installed from PyPI (honours PIP_INDEX_URL)
+# uv: pinned in files/uv-requirements.txt (version + sha256), installed from PyPI
+# (honours PIP_INDEX_URL).

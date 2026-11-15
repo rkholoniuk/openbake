@@ -13,7 +13,7 @@
 variable "WS_REGISTRY" { default = "" }             # empty = local image names only
 variable "WS_TAG" { default = "local" }
 variable "WS_PLATFORMS" { default = "" }            # empty = this machine's platform
-variable "WS_BASE_IMAGE" { default = "ubuntu:24.04" }
+variable "WS_BASE_IMAGE" { default = "ubuntu:24.04@sha256:2198e4c65076e9cb0b3d695219df667c0e3b0072da64ca3c2648aca17dcecaf5" }  # digest-pinned
 
 # Per-version overrides (spike mechanism; replaced by versions.yml + WS_EXTRA_VARS in M3).
 # Empty means "use the role default". Lists are JSON.
@@ -23,8 +23,6 @@ variable "WS_NODE_VERSIONS" { default = "" }        # e.g. ["24"]
 variable "WS_NEOVIM_VERSION" { default = "" }       # needs a matching entry in neovim_checksums
 variable "WS_CODE_SERVER_VERSION" { default = "" }
 variable "WS_CODE_SERVER_EXTENSIONS" { default = "" }  # e.g. ["ms-python.python"]
-variable "WS_CODEX_VERSION" { default = "" }
-variable "WS_CLAUDE_CODE_VERSION" { default = "" }
 variable "WS_GIT_KNOWN_HOSTS_SOURCE" { default = "" }  # static (role default) | github_meta | none
 
 # Custom images: start from a curated stage and add roles (yours live in custom/roles).
@@ -56,8 +54,6 @@ target "_common" {
     WSV_NEOVIM_VERSION         = WS_NEOVIM_VERSION
     WSV_CODE_SERVER_VERSION    = WS_CODE_SERVER_VERSION
     WSV_CODE_SERVER_EXTENSIONS = WS_CODE_SERVER_EXTENSIONS
-    WSV_CODEX_VERSION          = WS_CODEX_VERSION
-    WSV_CLAUDE_CODE_VERSION    = WS_CLAUDE_CODE_VERSION
     WSV_GIT_KNOWN_HOSTS_SOURCE = WS_GIT_KNOWN_HOSTS_SOURCE
   }
 }

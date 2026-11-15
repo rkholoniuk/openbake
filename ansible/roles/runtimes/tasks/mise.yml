@@ -10,6 +10,12 @@
   failed_when: false
   check_mode: false
 
+- name: Check a pinned checksum exists for mise {{ mise_version }}
+  ansible.builtin.assert:
+    that: mise_version in mise_checksums and ws_arch.node in mise_checksums[mise_version]
+    fail_msg: "no sha256 for mise {{ mise_version }} ({{ ws_arch.node }}) in mise_checksums"
+    quiet: true
+
 - name: Install mise {{ mise_version }}
   when: runtimes_mise_installed.rc != 0 or not runtimes_mise_installed.stdout.startswith(mise_version ~ ' ')
   block:
@@ -23,7 +29,7 @@
       ansible.builtin.get_url:
         url: "{{ mise_url }}"
         dest: "{{ ws_download_cache }}/mise/mise-{{ mise_version }}-{{ ws_arch.node }}"
-        checksum: "{{ mise_checksum | default(omit, true) }}"
+        checksum: "{{ mise_checksums[mise_version][ws_arch.node] }}"
         mode: "0755"
 
     - name: Install mise binary

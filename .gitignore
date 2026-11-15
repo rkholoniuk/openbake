@@ -52,3 +52,7 @@ ansible/inventories/*
 !ansible/inventories/local/
 !ansible/inventories/test/
 !ansible/inventories/example/
+
+# Python bytecode
+__pycache__/
+*.pyc
