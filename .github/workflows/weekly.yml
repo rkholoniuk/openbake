@@ -10,6 +10,11 @@ on:
   schedule:
     - cron: "17 3 * * 1"    # Mondays 03:17 UTC
   workflow_dispatch:
+  # Test changes to this workflow before they land (no issue is opened for PRs).
+  pull_request:
+    paths:
+      - .github/workflows/weekly.yml
+      - .github/scripts/report-weekly-failure.sh
 
 permissions:
   contents: read
@@ -45,7 +50,7 @@ jobs:
 
   report:
     needs: refresh
-    if: failure()
+    if: failure() && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
