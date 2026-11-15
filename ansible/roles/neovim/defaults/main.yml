@@ -5,7 +5,8 @@ neovim_url: "https://github.com/neovim/neovim/releases/download/{{ neovim_versio
 neovim_checksum: ""
 
 # What LazyVim and its plugins expect to find.
-neovim_packages: [ripgrep, fd-find, fzf, build-essential, unzip, git, curl]
+# ripgrep and fd come from cli_tools (in every image).
+neovim_packages: [fzf, build-essential, unzip, git, curl]
 
 neovim_lazyvim: true
 neovim_lazyvim_repo: https://github.com/LazyVim/starter

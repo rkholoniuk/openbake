@@ -41,6 +41,10 @@ RUN --mount=type=cache,target=/root/.cache/pip \
     python3 -m venv /opt/ansible/venv \
  && /opt/ansible/venv/bin/pip install "ansible-core==${ANSIBLE_CORE_VERSION}"
 COPY ansible/ansible.cfg ansible/apply.yml ansible/apply.sh /opt/ansible/
+# Profiles are read by apply.yml (-e ws_profile=...). A profile edit rebuilds
+# every role layer; images rebuild weekly anyway, role edits still rebuild
+# only from that role on.
+COPY ansible/profiles/ /opt/ansible/profiles/
 RUN chmod 0755 /opt/ansible/apply.sh
 
 # ---------------------------------------------------------------------------
@@ -58,6 +62,12 @@ RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     /opt/ansible/apply.sh git -e ws_target=image
+RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
+    --mount=type=bind,source=ansible/roles/cli_tools,target=/opt/roles/cli_tools \
+    --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
+    --mount=type=cache,target=/var/cache/ws,sharing=locked \
+    /opt/ansible/apply.sh cli_tools -e ws_target=image
 ENV MISE_DATA_DIR=/opt/mise \
     PATH=/opt/mise/shims:/opt/agents/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /home/user
@@ -91,15 +101,14 @@ RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,target=/var/cache/ws,sharing=locked \
     --mount=type=secret,id=github_token,required=false \
-    /opt/ansible/apply.sh neovim -e ws_target=image
+    /opt/ansible/apply.sh neovim -e ws_target=image -e ws_profile=devbox
 ARG WSV_CODE_SERVER_VERSION
 ARG WSV_CODE_SERVER_EXTENSIONS
 RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=bind,source=ansible/roles/code_server,target=/opt/roles/code_server \
     --mount=type=cache,target=/var/cache/ws,sharing=locked \
-    /opt/ansible/apply.sh code_server -e ws_target=image
+    /opt/ansible/apply.sh code_server -e ws_target=image -e ws_profile=devbox
 USER user
-EXPOSE 13337
 CMD ["ws-code-server"]
 
 # ---------------------------------------------------------------------------
@@ -110,13 +119,12 @@ RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=bind,source=ansible/roles/postgres,target=/opt/roles/postgres \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
-    /opt/ansible/apply.sh postgres -e ws_target=image
+    /opt/ansible/apply.sh postgres -e ws_target=image -e ws_profile=data
 RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=bind,source=ansible/roles/data_sample,target=/opt/roles/data_sample \
     --mount=type=cache,target=/var/cache/uv,sharing=locked \
-    /opt/ansible/apply.sh data_sample -e ws_target=image
+    /opt/ansible/apply.sh data_sample -e ws_target=image -e ws_profile=data
 USER user
-EXPOSE 3000 8501
 CMD ["ws-sample-data", "start", "--foreground"]
 
 # ---------------------------------------------------------------------------
@@ -130,7 +138,7 @@ RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,target=/root/.npm \
-    /opt/ansible/apply.sh agents -e ws_target=image
+    /opt/ansible/apply.sh agents -e ws_target=image -e ws_profile=agent
 USER user
 CMD ["bash", "-l"]
 
@@ -181,12 +189,12 @@ COPY --from=actionlint /usr/local/bin/actionlint /usr/local/bin/actionlint
 ENV PATH=/opt/ansible/venv/bin:$PATH
 WORKDIR /src
 
-# check: re-apply a finished image's roles in check mode (--check --diff).
+# check: re-apply a finished image's profile (all its roles) in check mode (--check --diff).
 # A built image must already be in the state its roles describe, so the run
 # has to report changed=0. Catches roles that would change things on every
 # run, and roles that break in check mode (which `make host CHECK=1` relies on).
 FROM ${CUSTOM_FROM} AS check
-ARG CHECK_ROLES
+ARG CHECK_PROFILE
 # Same role variables as the build (empty = role default).
 ARG WSV_GIT_KNOWN_HOSTS_SOURCE
 ARG WSV_RUNTIMES_INSTALLER
@@ -206,8 +214,8 @@ RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,target=/var/cache/ws,sharing=locked \
     --mount=type=cache,target=/root/.npm \
-    test -n "${CHECK_ROLES}" || { echo "CHECK_ROLES is empty" >&2; exit 1; }; \
-    ANSIBLE_ROLES_PATH=/opt/custom-roles:/opt/roles sh /opt/check-mode.sh "${CHECK_ROLES}"
+    test -n "${CHECK_PROFILE}" || { echo "CHECK_PROFILE is empty" >&2; exit 1; }; \
+    ANSIBLE_ROLES_PATH=/opt/custom-roles:/opt/roles sh /opt/check-mode.sh "${CHECK_PROFILE}"
 
 # scan: Trivy for the image gate (`make scan`). Version and sha256 are pinned
 # here (versions.yml from M3). Trivy's own release channel was compromised in

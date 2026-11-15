@@ -1,0 +1,8 @@
+---
+name: devbox
+targets: [image, host]
+roles: [base, git, cli_tools, runtimes, neovim, code_server]
+# Extensions are added once M3 pins them (version + sha256 in versions.yml).
+vars: {}
+workspace:
+  ports: {code-server: 13337}

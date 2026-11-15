@@ -12,7 +12,7 @@ setting up real machines with `make host` are next.
 
 | Image | Contents |
 |---|---|
-| `ws-minimal` | Ubuntu 24.04, user `user` (uid 1000), core packages, git, tini |
+| `ws-minimal` | Ubuntu 24.04, user `user` (uid 1000), core packages, git, tini, ripgrep, fd, bat, tmux, direnv, jq, yq, gh |
 | `ws-devbox` | minimal + Python and Node (mise), uv, Neovim + LazyVim (plugins pre-installed), code-server |
 | `ws-data` | minimal + Python, uv, PostgreSQL 16, a Streamlit + Dagster sample pipeline |
 | `ws-agent` | minimal + Python, Node, Codex and Claude Code CLIs |
@@ -49,7 +49,8 @@ images/Dockerfile   os ─► ansible (venv, bind-mounted only)
                     os ─► minimal ─► runtimes ─► devbox | data | agent
                     any ─► custom
 ansible/apply.sh    runs roles: apply.sh base,git -e ws_target=image
-ansible/roles/      base git runtimes neovim code_server postgres data_sample agents
+ansible/roles/      base git cli_tools runtimes neovim code_server postgres data_sample agents
+ansible/profiles/   minimal devbox data agent: roles in layer order, allowed targets, vars, ports
 ```
 
 Each role runs in its own `RUN` step, so editing one role rebuilds only the layers from that role
@@ -60,7 +61,7 @@ steps.
 ## Repository layout
 
 ```text
-ansible/        apply.yml, apply.sh, ansible.cfg, roles/
+ansible/        apply.yml, apply.sh, ansible.cfg, roles/, profiles/ (one file per image/host setup)
 custom/roles/   your roles for `make custom`
 images/         Dockerfile, docker-bake.hcl, smoke.sh
 docs/           design, guidelines, security policy

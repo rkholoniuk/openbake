@@ -31,7 +31,7 @@ variable "WS_GIT_KNOWN_HOSTS_SOURCE" { default = "" }  # static (role default) |
 variable "WS_CUSTOM_FROM" { default = "devbox" }
 variable "WS_CUSTOM_ROLES" { default = "" }
 variable "WS_CUSTOM_VARS" { default = "" }          # JSON object of extra role variables
-variable "WS_CHECK_ROLES" { default = "" }          # roles to re-apply in check mode (make check)
+variable "WS_CHECK_PROFILE" { default = "" }        # profile to re-apply in check mode (make check)
 
 function "image" {
   params = [profile]
@@ -111,7 +111,7 @@ target "check" {
   # same filesystem as the image `make image` built. The result is discarded.
   args = {
     CUSTOM_FROM = WS_CUSTOM_FROM
-    CHECK_ROLES = WS_CHECK_ROLES
+    CHECK_PROFILE = WS_CHECK_PROFILE
   }
   output = ["type=cacheonly"]
 }

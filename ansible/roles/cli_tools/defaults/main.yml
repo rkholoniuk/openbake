@@ -1,0 +1,16 @@
+---
+cli_tools_role_targets: [image, host]
+
+# From Ubuntu (jq comes with base).
+cli_tools_packages: [ripgrep, fd-find, bat, tmux, direnv]
+
+# Pinned binaries (move to versions.yml in M3). sha256 per architecture,
+# checked against each project's published checksums file.
+cli_tools_yq_version: "4.54.3"
+cli_tools_yq_checksums:
+  amd64: sha256:129534601871538efe0ba4c5e62a34fb1d5f469bcb975c4fddeb467d82974973
+  arm64: sha256:89f69310b61b68d1245065a1241d1fc843f7a36cd6103ffd77ad987613bd1b67
+cli_tools_gh_version: "2.104.0"
+cli_tools_gh_checksums:
+  amd64: sha256:98cb101ad87dbbd3f6b2f2bfcbd43197ccd07643140121d8a9cfaa91eadbc24e
+  arm64: sha256:cb34cefc6f4e77b90731374a2b737516bb8f3033c6ca46aa949e5344f68069e3

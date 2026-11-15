@@ -1,0 +1,7 @@
+---
+name: agent
+targets: [image, host]
+roles: [base, git, cli_tools, runtimes, agents]
+vars: {}
+workspace:
+  ports: {}

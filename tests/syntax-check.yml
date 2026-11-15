@@ -17,6 +17,7 @@
   roles:
     - base
     - git
+    - cli_tools
     - runtimes
     - neovim
     - code_server

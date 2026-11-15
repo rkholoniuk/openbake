@@ -650,6 +650,7 @@ fallback for.
 | 2026-11-14 | D3: `make up` prefers a `ws-<p>:local` image when one exists | owner |
 | 2026-11-14 | Inventories per environment under `ansible/inventories/` (`local`, `test`, `example` committed; real ones git-ignored) | owner |
 | 2026-11-14 | Dedicated automation account for host runs (`automation_account` role, opt-in bootstrap); `become` per task or block, not per play | owner |
+| 2026-11-15 | M2 as built: profile vars are applied with a `set_fact` loop (between role defaults and `-e`); `apply.sh -` runs all roles of `-e ws_profile=`; `make check` re-applies a profile; `jq` stays in `base` (ws-info needs it); devbox has no code-server extensions until M3 pins them | design, from M2 implementation |
 | 2026-11-15 | Roles use probe-then-act: the BuildKit download cache is never state; manifests are written with `copy` content; no `changed_when: true`. `make check` blocks for all images (first part of M4) | design, from CI check-mode results |
 | 2026-11-14 | `make ping`: ping + connectivity report (DNS, HTTPS to download sources, IPv4/IPv6) before host runs | owner |
 | 2026-11-14 | Tool split (6.0): OpenTofu provisions, Ansible configures; inventories generated from OpenTofu outputs; remote Kubernetes via Ansible-installed RKE2 + Rancher | owner |
