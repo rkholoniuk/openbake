@@ -11,7 +11,7 @@
 # (mise or distro) and never downloads one. `--check` only compares the
 # environment with the lock file, so it is safe in check mode.
 - name: Check the project environment against uv.lock
-  ansible.builtin.command: uv sync --frozen --no-dev --check --project {{ data_sample_src }}
+  ansible.builtin.command: uv sync --frozen --no-dev --no-build --check --project {{ data_sample_src }}
   environment: &data_sample_uv_env
     PATH: "/opt/mise/shims:{{ ansible_env.PATH }}"
     MISE_DATA_DIR: /opt/mise
@@ -29,7 +29,7 @@
   check_mode: false
 
 - name: Create the project environment
-  ansible.builtin.command: uv sync --frozen --no-dev --project {{ data_sample_src }}
+  ansible.builtin.command: uv sync --frozen --no-dev --no-build --project {{ data_sample_src }}
   environment: *data_sample_uv_env
   register: data_sample_uv_sync
   when: data_sample_uv_check.rc != 0

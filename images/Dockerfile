@@ -78,7 +78,7 @@ RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=cache,target=/var/cache/ws,sharing=locked \
     /opt/ansible/apply.sh cli_tools -e ws_target=image
 ENV MISE_DATA_DIR=/opt/mise \
-    PATH=/opt/mise/shims:/opt/agents/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    PATH=/opt/mise/shims:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 WORKDIR /home/user
 ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/ws-init"]
 USER user
@@ -109,7 +109,6 @@ RUN --mount=type=bind,from=ansible,source=/opt/ansible,target=/opt/ansible \
     --mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt/lists,sharing=locked \
     --mount=type=cache,target=/var/cache/ws,sharing=locked \
-    --mount=type=secret,id=github_token,required=false \
     /opt/ansible/apply.sh neovim -e ws_target=image -e ws_profile=devbox
 ARG WSV_CODE_SERVER_VERSION
 ARG WSV_CODE_SERVER_EXTENSIONS
