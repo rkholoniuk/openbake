@@ -42,6 +42,18 @@ Pick versions with `WS_*` variables (they are listed in
 WS_PYTHON_VERSIONS='["3.13","3.12"]' WS_NODE_VERSIONS='["24"]' make image PROFILE=devbox
 ```
 
+## Keeping images patched
+
+A normal `make image` reuses cached layers, so it does **not** pick up new security updates.
+
+```sh
+make refresh PROFILE=devbox   # newest ubuntu:24.04, no cache, then smoke, check mode and Trivy
+```
+
+CI runs `make refresh` for every image each Monday and opens an issue if a fresh build, check
+mode or the Trivy gate fails. Don't `apt upgrade` inside a running workspace: only `/home/user`
+survives a rebuild, so refresh the image instead.
+
 ## How it works
 
 ```text

@@ -1,0 +1,63 @@
+---
+name: weekly
+
+# Patching: rebuild every image from scratch once a week (newest ubuntu:24.04,
+# current security updates), then smoke, check mode and the Trivy gate. A
+# failure opens one issue (later failures comment on it). Same steps as
+# `make refresh` locally.
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"    # Mondays 03:17 UTC
+  workflow_dispatch:
+  # Test changes to this workflow before they land (no issue is opened for PRs).
+  pull_request:
+    paths:
+      - .github/workflows/weekly.yml
+      - .github/scripts/report-weekly-failure.sh
+
+permissions:
+  contents: read
+
+concurrency:
+  group: weekly
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift
+          sudo docker image prune --all --force > /dev/null
+          df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+        with:
+          version: v0.39.0
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+      - name: make refresh
+        run: make refresh
+
+  report:
+    needs: refresh
+    if: failure() && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Open or update the weekly issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/report-weekly-failure.sh
