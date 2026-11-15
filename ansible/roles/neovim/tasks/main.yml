@@ -13,33 +13,42 @@
     dest: /usr/local/bin/fd
     state: link
 
-- name: Create download cache
-  ansible.builtin.file:
-    path: "{{ ws_download_cache }}/neovim"
-    state: directory
-    mode: "0755"
+# Probe, then act: the BuildKit download cache may be empty and is not state.
+- name: Find installed Neovim {{ neovim_version }}
+  ansible.builtin.stat:
+    path: "/opt/nvim-{{ neovim_version }}/bin/nvim"
+  register: neovim_installed
 
-- name: Download Neovim
-  ansible.builtin.get_url:
-    url: "{{ neovim_url }}"
-    dest: "{{ ws_download_cache }}/neovim/nvim-{{ neovim_version }}-{{ ws_arch.gnu }}.tar.gz"
-    checksum: "{{ neovim_checksum | default(omit, true) }}"
-    # "stable" is a moving tag, so always re-check it; pinned versions come from cache.
-    force: "{{ neovim_version == 'stable' }}"
-    mode: "0644"
+- name: Install Neovim {{ neovim_version }}
+  # "stable" is a moving tag (pinned from M3), so it is always refreshed.
+  when: not neovim_installed.stat.exists or neovim_version == 'stable'
+  block:
+    - name: Create download cache
+      ansible.builtin.file:
+        path: "{{ ws_download_cache }}/neovim"
+        state: directory
+        mode: "0755"
 
-- name: Create install directory
-  ansible.builtin.file:
-    path: "/opt/nvim-{{ neovim_version }}"
-    state: directory
-    mode: "0755"
+    - name: Download Neovim
+      ansible.builtin.get_url:
+        url: "{{ neovim_url }}"
+        dest: "{{ ws_download_cache }}/neovim/nvim-{{ neovim_version }}-{{ ws_arch.gnu }}.tar.gz"
+        checksum: "{{ neovim_checksum | default(omit, true) }}"
+        force: "{{ neovim_version == 'stable' }}"
+        mode: "0644"
 
-- name: Unpack Neovim
-  ansible.builtin.unarchive:
-    src: "{{ ws_download_cache }}/neovim/nvim-{{ neovim_version }}-{{ ws_arch.gnu }}.tar.gz"
-    dest: "/opt/nvim-{{ neovim_version }}"
-    remote_src: true
-    extra_opts: [--strip-components=1]
+    - name: Create install directory
+      ansible.builtin.file:
+        path: "/opt/nvim-{{ neovim_version }}"
+        state: directory
+        mode: "0755"
+
+    - name: Unpack Neovim
+      ansible.builtin.unarchive:
+        src: "{{ ws_download_cache }}/neovim/nvim-{{ neovim_version }}-{{ ws_arch.gnu }}.tar.gz"
+        dest: "/opt/nvim-{{ neovim_version }}"
+        remote_src: true
+        extra_opts: [--strip-components=1]
 
 - name: Link nvim onto PATH
   ansible.builtin.file:
@@ -47,8 +56,15 @@
     dest: /usr/local/bin/nvim
     state: link
 
+# The starter's .git is removed after cloning (the config becomes the user's),
+# so "already set up" is detected from init.lua, not from the git checkout.
+- name: Find an existing LazyVim config
+  ansible.builtin.stat:
+    path: "{{ ws_home }}/.config/nvim/init.lua"
+  register: neovim_lazyvim_config
+
 - name: Set up LazyVim
-  when: neovim_lazyvim | bool
+  when: neovim_lazyvim | bool and not neovim_lazyvim_config.stat.exists
   become: true
   become_user: "{{ ws_user }}"
   block:
@@ -70,10 +86,16 @@
       ansible.builtin.command: nvim --headless "+Lazy! sync" +qa
       environment:
         HOME: "{{ ws_home }}"
-      changed_when: true
+      register: neovim_lazy_sync
+      changed_when: neovim_lazy_sync.rc == 0    # runs only on first setup
       when: neovim_lazyvim_sync | bool
 
-# Kubernetes home volumes start empty: ws-init seeds them from /etc/skel.
+# Home volumes start empty: ws-init seeds them from /etc/skel.
+- name: Find the editor setup in /etc/skel
+  ansible.builtin.stat:
+    path: /etc/skel/.config/nvim/init.lua
+  register: neovim_skel
+
 - name: Copy the editor setup into /etc/skel
   ansible.builtin.shell: |
     set -eu
@@ -84,14 +106,21 @@
   args:
     chdir: "{{ ws_home }}"
     executable: /bin/bash
-  when: neovim_lazyvim | bool
-  changed_when: true
+  register: neovim_skel_copy
+  when: neovim_lazyvim | bool and (neovim_lazy_sync is changed or not neovim_skel.stat.exists)
+  changed_when: neovim_skel_copy.rc == 0    # runs only after a fresh setup
+
+- name: Read installed Neovim version
+  ansible.builtin.command: /usr/local/bin/nvim --version
+  register: neovim_version_out
+  changed_when: false
+  failed_when: false    # not installed yet in a check-mode preview
+  check_mode: false
 
 - name: Record role in image manifest
-  ansible.builtin.shell: |
-    set -eu
-    printf '{"role":"neovim","nvim":"%s","lazyvim":%s}\n' \
-      "$(nvim --version | head -1 | awk '{print $2}')" "{{ neovim_lazyvim | bool | to_json }}" > /etc/ws-image/neovim.json
-  args:
-    executable: /bin/bash
-  changed_when: true
+  ansible.builtin.copy:
+    dest: /etc/ws-image/neovim.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'neovim', 'nvim': (neovim_version_out.stdout_lines[0].split() | last) if neovim_version_out.rc == 0 else 'none',
+          'lazyvim': neovim_lazyvim | bool} | to_json }}

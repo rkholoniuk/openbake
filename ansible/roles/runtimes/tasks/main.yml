@@ -33,16 +33,29 @@
     executable: /bin/bash
     creates: /opt/uv/bin/uv
 
-- name: Record role in image manifest
+# Manifest: probe versions (read-only), then write the file only when its
+# content changes.
+- name: Read installed runtime versions
   ansible.builtin.shell: |
     set -eu
     export PATH="{{ mise_data_dir }}/shims:$PATH" MISE_DATA_DIR="{{ mise_data_dir }}"
-    py=$( (python3 --version 2>&1 || true) | awk '{print $2}')
-    node=$( (node --version 2>/dev/null || echo none) )
-    printf '{"role":"runtimes","installer":"%s","python_default":"%s","python_versions":%s,"node_default":"%s","node_versions":%s,"uv":"%s"}\n' \
-      "{{ runtimes_installer }}" "$py" '{{ python_versions | to_json }}' "$node" '{{ node_versions | to_json }}' \
-      "$(uv --version | awk '{print $2}')" > /etc/ws-image/runtimes.json
-    cat /etc/ws-image/runtimes.json
+    echo "python=$( (python3 --version 2>&1 || true) | awk '{print $2}')"
+    echo "node=$(node --version 2>/dev/null || echo none)"
+    echo "uv=$( (uv --version 2>/dev/null || echo "uv none") | awk '{print $2}')"
   args:
     executable: /bin/bash
-  changed_when: true
+  register: runtimes_versions
+  changed_when: false
+  check_mode: false
+
+- name: Record role in image manifest
+  vars:
+    runtimes_v: "{{ dict(runtimes_versions.stdout_lines | map('split', '=', 1)) }}"
+  ansible.builtin.copy:
+    dest: /etc/ws-image/runtimes.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'runtimes', 'installer': runtimes_installer,
+          'python_default': runtimes_v.python, 'python_versions': python_versions,
+          'node_default': runtimes_v.node, 'node_versions': node_versions,
+          'uv': runtimes_v.uv} | to_json }}
