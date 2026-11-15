@@ -20,6 +20,9 @@
     UV_LINK_MODE: copy
     UV_PYTHON_DOWNLOADS: never
     UV_PYTHON_PREFERENCE: only-system
+    # Python run as root would leave root-owned __pycache__ in the venv and the
+    # mise Python install, undoing the chown steps (check mode then reports a change).
+    PYTHONDONTWRITEBYTECODE: "1"
   register: data_sample_uv_check
   changed_when: false
   failed_when: false    # non-zero means "not in sync"
@@ -75,6 +78,10 @@
     mode: "0755"
 
 - name: Read sample environment versions
+  become: true
+  become_user: "{{ ws_user }}"
+  environment:
+    PYTHONDONTWRITEBYTECODE: "1"
   ansible.builtin.command: >-
     {{ data_sample_venv }}/bin/python -c
     "import platform, dagster, streamlit; print(platform.python_version(), dagster.__version__, streamlit.__version__)"
