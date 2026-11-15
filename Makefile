@@ -4,9 +4,9 @@
 #   make image                       build devbox, data and agent for this machine
 #   make image PROFILE=agent         build one image (or several: PROFILE="minimal agent")
 #   make smoke [PROFILE=devbox]      check images
-#   make lint                        yamllint, profiles consistency, ansible-lint, --syntax-check, actionlint, shellcheck
+#   make lint                        yamllint, profiles consistency, ansible-lint, --syntax-check, actionlint, zizmor, shellcheck
 #   make check [PROFILE=devbox]      re-apply an image's roles with --check: must report changed=0
-#   make scan [PROFILE=devbox]       Trivy gate: fails on CRITICAL vulnerabilities with a fix, or secrets
+#   make scan [PROFILE=devbox]       Trivy (CRITICAL with a fix, secrets) + OSV (malicious packages) gate
 #   make ci [PROFILE=devbox]         everything CI runs, in the same order (lint image smoke check scan)
 #   make refresh [PROFILE=devbox]    rebuild from scratch (new base image + current security updates),
 #                                    then smoke, check and scan. A plain `make image` reuses cached layers.
@@ -33,6 +33,12 @@ ref = $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$(1):$(WS_TAG)
 LINT_IMAGE    = $(call ref,lint)
 SCAN_IMAGE    = $(call ref,scan)
 SCAN_PROFILES ?= minimal devbox data agent
+# Lockfiles checked for malicious packages (OSV MAL- advisories) by make scan.
+OSV_LOCKFILES = -L /src/ansible/roles/agents/files/package-lock.json \
+	-L /src/ansible/roles/data_sample/files/streamlit-dagster/uv.lock \
+	-L requirements.txt:/src/images/requirements/ansible.txt \
+	-L requirements.txt:/src/images/requirements/lint.txt \
+	-L requirements.txt:/src/ansible/roles/runtimes/files/uv-requirements.txt
 TRIVY = docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 	  -v ws-trivy-cache:/root/.cache/trivy -v "$(CURDIR)/security:/security:ro" \
 	  $(SCAN_IMAGE) image --ignorefile /security/trivyignore.yaml --exit-code 1 --no-progress
@@ -63,6 +69,7 @@ lint:
 	    ansible-playbook --syntax-check -i localhost, tests/syntax-check.yml; \
 	    echo "== ansible-lint"; ansible-lint; \
 	    echo "== actionlint"; actionlint; \
+	    echo "== zizmor (GitHub workflow security)"; zizmor --offline --min-severity medium .github/workflows; \
 	    echo "== actions pinned to commit SHAs"; \
 	    if grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; then \
 	      echo "unpinned action(s) above: pin to a full commit SHA" >&2; exit 1; fi; \
@@ -101,11 +108,23 @@ check:
 # Accepted findings go in security/trivyignore.yaml (each with a reason and expiry).
 scan:
 	$(BAKE) scan
+	@echo "== osv: malicious packages in lockfiles"
+	@docker run --rm --entrypoint sh -v "$(CURDIR):/src:ro" $(SCAN_IMAGE) -c '\
+	  osv-scanner scan source $(OSV_LOCKFILES) --format json --output-file /tmp/osv.json > /tmp/osv.log 2>&1; rc=$$?; \
+	  tail -3 /tmp/osv.log; python3 /src/security/osv-gate.py /tmp/osv.json $$rc lockfiles'
 	@for p in $(or $(PROFILE),$(SCAN_PROFILES)); do \
-	  echo "== trivy: $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$$p:$(WS_TAG)"; \
 	  img="$(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$$p:$(WS_TAG)"; \
+	  echo "== trivy: $$img"; \
 	  $(TRIVY) --scanners vuln --severity CRITICAL --ignore-unfixed "$$img" || exit 1; \
 	  $(TRIVY) --scanners secret "$$img" || exit 1; \
+	  echo "== osv: malicious packages in $$img"; \
+	  tmp="$$(mktemp -d)"; \
+	  docker save "$$img" -o "$$tmp/image.tar" || exit 1; \
+	  docker run --rm --entrypoint sh -v "$$tmp:/work" -v "$(CURDIR)/security:/security:ro" $(SCAN_IMAGE) -c '\
+	    osv-scanner scan image --archive /work/image.tar --format json --output-file /work/osv.json > /work/osv.log 2>&1; rc=$$?; \
+	    tail -3 /work/osv.log; python3 /security/osv-gate.py /work/osv.json $$rc image'; rc=$$?; \
+	  rm -f "$$tmp/image.tar" "$$tmp/osv.json" "$$tmp/osv.log"; rmdir "$$tmp"; \
+	  [ $$rc -eq 0 ] || exit $$rc; \
 	done
 
 # Patching: --pull fetches the newest ubuntu:24.04, --no-cache re-runs every

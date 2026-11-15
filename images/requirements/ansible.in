@@ -1,0 +1,4 @@
+# ansible-core for the build-time venv (ansible stage). Regenerate ansible.txt:
+#   uv pip compile --universal --generate-hashes --python-version 3.12 \
+#     images/requirements/ansible.in -o images/requirements/ansible.txt
+ansible-core==2.21.6

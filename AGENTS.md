@@ -16,6 +16,8 @@ built and in which order.
   versions plus sha256 for downloads, exact versions for Python/npm tools, and no moving tags
   (`latest`, `stable`, `main`). Never use the `aquasecurity/trivy-action` or
   `setup-trivy` Actions (CVE-2026-33634).
+- **Supply chain:** follow [docs/security/supply-chain-policy.md](docs/security/supply-chain-policy.md)
+  (sources, pins, no install scripts, gates, adding a dependency).
 - **Secrets:** never in build args, `WS_*` variables, role defaults, logs or commits.
 - **Design changes:** update [docs/design/phase1-design.md](docs/design/phase1-design.md) in the
   same PR when behaviour differs from it.

@@ -1,8 +1,8 @@
 ---
 - name: Check agent list
   ansible.builtin.assert:
-    that: agents | difference(agents_npm_packages.keys() | list) | length == 0
-    fail_msg: "Unknown agents {{ agents | difference(agents_npm_packages.keys() | list) }}; known: {{ agents_npm_packages.keys() | list }}"
+    that: agents | difference(agents_npm.keys() | list) | length == 0
+    fail_msg: "Unknown agents {{ agents | difference(agents_npm.keys() | list) }}; known: {{ agents_npm.keys() | list }}"
     quiet: true
 
 - name: Install agent helper packages
@@ -31,54 +31,64 @@
     fail_msg: "Need Node >= {{ agents_node_min_major }}, found: {{ agents_node.stdout | default('none', true) }}"
     quiet: true
 
-- name: List installed agent CLIs
-  ansible.builtin.command: npm ls --global --prefix {{ agents_prefix }} --depth=0 --json
-  environment:
-    PATH: "/opt/mise/shims:{{ ansible_env.PATH }}"
-    MISE_DATA_DIR: /opt/mise
-  register: agents_npm_ls
-  changed_when: false
-  failed_when: false    # empty prefix on first run
+- name: Create {{ agents_prefix }}
+  ansible.builtin.file:
+    path: "{{ agents_prefix }}"
+    state: directory
+    mode: "0755"
+
+- name: Install package.json and package-lock.json
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "{{ agents_prefix }}/{{ item }}"
+    mode: "0644"
+  loop: [package.json, package-lock.json]
+
+# Probe, then act: node_modules matches the lockfile when the marker written
+# after the last successful install holds the lockfile's sha256.
+- name: Read the installed lockfile marker
+  ansible.builtin.slurp:
+    src: "{{ agents_prefix }}/node_modules/.ws-lock-sha256"
+  register: agents_marker
+  failed_when: false
   check_mode: false
 
-# agents_npm_packages values are "<package>@<version>"; the package name may
-# itself start with "@" (scoped), so split on the last "@".
-- name: Work out missing agent CLIs
-  vars:
-    agents_have: "{{ ((agents_npm_ls.stdout | from_json).dependencies | default({})) if agents_npm_ls.stdout else {} }}"
-  ansible.builtin.set_fact:
-    agents_missing: >-
-      {%- set missing = [] -%}
-      {%- for a in agents -%}
-      {%-   set spec = agents_npm_packages[a] -%}
-      {%-   set name = spec.rsplit('@', 1)[0] -%}
-      {%-   set version = spec.rsplit('@', 1)[1] -%}
-      {%-   if agents_have.get(name, {}).get('version') != version -%}
-      {%-     set _ = missing.append(spec) -%}
-      {%-   endif -%}
-      {%- endfor -%}
-      {{ missing }}
-
-- name: Install agent CLIs into {{ agents_prefix }}
-  ansible.builtin.command: >-
-    npm install --global --no-fund --no-audit --prefix {{ agents_prefix }}
-    {{ agents_missing | join(' ') }}
+- name: Install agent CLIs from the lockfile (npm ci, no install scripts)
+  ansible.builtin.command: npm ci --ignore-scripts --no-fund --no-audit --prefix {{ agents_prefix }}
   environment:
     PATH: "/opt/mise/shims:{{ ansible_env.PATH }}"
     MISE_DATA_DIR: /opt/mise
-  register: agents_npm_install
-  when: agents_missing | length > 0
-  changed_when: agents_npm_install.rc == 0    # runs only for missing or outdated CLIs
+    npm_config_ignore_scripts: "true"
+  register: agents_npm_ci
+  when: (agents_marker.content | default('') | b64decode | trim) != (lookup('file', 'package-lock.json') | hash('sha256'))
+  changed_when: agents_npm_ci.rc == 0    # runs only when node_modules doesn't match the lockfile
+
+- name: Run reviewed install scripts
+  ansible.builtin.command: node {{ item | basename }}
+  args:
+    chdir: "{{ agents_prefix }}/node_modules/{{ item | dirname }}"
+  environment:
+    PATH: "/opt/mise/shims:{{ ansible_env.PATH }}"
+    MISE_DATA_DIR: /opt/mise
+  loop: "{{ agents_allowed_install_scripts }}"
+  register: agents_scripts
+  when: agents_npm_ci is changed
+  changed_when: agents_scripts.rc == 0    # runs only after npm ci
+
+- name: Record the installed lockfile
+  ansible.builtin.copy:
+    dest: "{{ agents_prefix }}/node_modules/.ws-lock-sha256"
+    content: "{{ lookup('file', 'package-lock.json') | hash('sha256') }}\n"
+    mode: "0644"
+  when: not ansible_check_mode or agents_npm_ci is not skipped
 
 - name: Link agent CLIs onto PATH
   ansible.builtin.file:
-    src: "{{ agents_prefix }}/bin/{{ item.bin }}"
-    dest: "/usr/local/bin/{{ item.bin }}"
+    src: "{{ agents_prefix }}/node_modules/.bin/{{ agents_npm[item].bin }}"
+    dest: "/usr/local/bin/{{ agents_npm[item].bin }}"
     state: link
-  loop:
-    - { name: codex, bin: codex }
-    - { name: claude_code, bin: claude }
-  when: item.name in agents
+    force: "{{ ansible_check_mode }}"    # target may only be simulated in check mode
+  loop: "{{ agents }}"
 
 # Images are rebuilt instead of self-updating; credentials come from the
 # environment at run time (ANTHROPIC_API_KEY, OPENAI_API_KEY), never the image.
@@ -90,10 +100,14 @@
       export DISABLE_AUTOUPDATER=1
 
 - name: Record role in image manifest
+  vars:
+    agents_lock: "{{ lookup('file', 'package-lock.json') | from_json }}"
   ansible.builtin.copy:
     dest: /etc/ws-image/agents.json
     mode: "0644"
     content: >
       {{ {'role': 'agents', 'node': agents_node.stdout | default('none', true),
-          'codex': codex_version if 'codex' in agents else 'none',
-          'claude_code': claude_code_version if 'claude_code' in agents else 'none'} | to_json }}
+          'lockfile_sha256': lookup('file', 'package-lock.json') | hash('sha256'),
+          'codex': agents_lock.packages['node_modules/@openai/codex'].version if 'codex' in agents else 'none',
+          'claude_code': agents_lock.packages['node_modules/@anthropic-ai/claude-code'].version
+                         if 'claude_code' in agents else 'none'} | to_json }}

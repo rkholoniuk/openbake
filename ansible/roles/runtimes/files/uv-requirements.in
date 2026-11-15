@@ -1,0 +1,4 @@
+# uv for /opt/uv. Regenerate uv-requirements.txt:
+#   uv pip compile --universal --generate-hashes --python-version 3.12 \
+#     ansible/roles/runtimes/files/uv-requirements.in -o ansible/roles/runtimes/files/uv-requirements.txt
+uv==0.13.7

@@ -22,16 +22,38 @@
     update_cache: true
     cache_valid_time: 3600
 
-- name: Install uv into /opt/uv
-  ansible.builtin.shell: |
-    set -eu
-    python3 -m venv /opt/uv
-    /opt/uv/bin/pip install --quiet "uv=={{ uv_version }}"
-    ln -sf /opt/uv/bin/uv /usr/local/bin/uv
-    ln -sf /opt/uv/bin/uvx /usr/local/bin/uvx
+# uv is pinned by version and sha256 (files/uv-requirements.txt, wheels only).
+# Probe, then act: reinstall when the requirements file changed or uv is missing.
+- name: Create the uv venv
+  ansible.builtin.command: python3 -m venv /opt/uv
   args:
-    executable: /bin/bash
-    creates: /opt/uv/bin/uv
+    creates: /opt/uv/bin/pip
+
+- name: Install the uv requirements file
+  ansible.builtin.copy:
+    src: uv-requirements.txt
+    dest: /opt/uv/requirements.txt
+    mode: "0644"
+  register: runtimes_uv_requirements
+
+- name: Find uv
+  ansible.builtin.stat:
+    path: /opt/uv/bin/uv
+  register: runtimes_uv_bin
+
+- name: Install uv (hash-checked)
+  ansible.builtin.command: "/opt/uv/bin/pip install --quiet --require-hashes --only-binary :all: -r /opt/uv/requirements.txt"
+  register: runtimes_uv_install
+  when: runtimes_uv_requirements is changed or not runtimes_uv_bin.stat.exists
+  changed_when: runtimes_uv_install.rc == 0    # runs only when the pin changed or uv is missing
+
+- name: Put uv and uvx on PATH
+  ansible.builtin.file:
+    src: "/opt/uv/bin/{{ item }}"
+    dest: "/usr/local/bin/{{ item }}"
+    state: link
+    force: "{{ ansible_check_mode }}"    # target may only be simulated in check mode
+  loop: [uv, uvx]
 
 # Manifest: probe versions (read-only), then write the file only when its
 # content changes.
