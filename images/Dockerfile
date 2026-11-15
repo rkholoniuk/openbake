@@ -26,7 +26,11 @@ RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
     rm -f /etc/apt/apt.conf.d/docker-clean \
  && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' > /etc/apt/apt.conf.d/keep-cache \
  && apt-get update \
+ && apt-get -y upgrade \
  && apt-get install -y --no-install-recommends python3 python3-apt ca-certificates
+# `apt-get upgrade` brings packages inherited from ubuntu:24.04 up to today's
+# security updates. Normal builds reuse this cached layer; `make refresh`
+# (--no-cache) re-runs it, which is how the weekly rebuild patches them.
 
 # ---------------------------------------------------------------------------
 # ansible: ansible-core in a venv; bind-mounted into later RUN steps only

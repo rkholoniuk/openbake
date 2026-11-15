@@ -114,7 +114,7 @@ REFRESH_PROFILES ?= minimal devbox data agent
 refresh:
 	$(MAKE) image PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))" BAKE_ARGS="$(BAKE_ARGS) --pull --no-cache"
 	$(MAKE) smoke PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))"
-	$(MAKE) check PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))"
+	$(MAKE) check PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))" BAKE_ARGS="$(BAKE_ARGS) --pull"
 	$(MAKE) scan PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))"
 
 custom:

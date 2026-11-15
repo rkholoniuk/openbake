@@ -13,9 +13,16 @@
     path: "/opt/nvim-{{ neovim_version }}/bin/nvim"
   register: neovim_installed
 
+- name: Check a pinned checksum exists for Neovim {{ neovim_version }}
+  ansible.builtin.assert:
+    that: neovim_version in neovim_checksums and ws_arch.gnu in neovim_checksums[neovim_version]
+    fail_msg: >-
+      no sha256 for Neovim {{ neovim_version }} ({{ ws_arch.gnu }}) in neovim_checksums;
+      add one (from the release's asset digests) instead of downloading unchecked
+    quiet: true
+
 - name: Install Neovim {{ neovim_version }}
-  # "stable" is a moving tag (pinned from M3), so it is always refreshed.
-  when: not neovim_installed.stat.exists or neovim_version == 'stable'
+  when: not neovim_installed.stat.exists
   block:
     - name: Create download cache
       ansible.builtin.file:
@@ -27,8 +34,7 @@
       ansible.builtin.get_url:
         url: "{{ neovim_url }}"
         dest: "{{ ws_download_cache }}/neovim/nvim-{{ neovim_version }}-{{ ws_arch.gnu }}.tar.gz"
-        checksum: "{{ neovim_checksum | default(omit, true) }}"
-        force: "{{ neovim_version == 'stable' }}"
+        checksum: "{{ neovim_checksums[neovim_version][ws_arch.gnu] }}"
         mode: "0644"
 
     - name: Create install directory

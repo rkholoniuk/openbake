@@ -19,8 +19,9 @@ on:
 permissions:
   contents: read
 
+# One group per event and ref: a PR run must never displace a pending scheduled run.
 concurrency:
-  group: weekly
+  group: weekly-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -31,8 +32,6 @@ jobs:
         runner: [ubuntu-24.04, ubuntu-24.04-arm]
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
-    env:
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - name: Free disk space
         run: |
@@ -41,11 +40,16 @@ jobs:
           sudo docker image prune --all --force > /dev/null
           df -h /
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
         with:
           version: v0.39.0
           driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
       - name: make refresh
+        env:
+          # Mounted as a BuildKit secret for mise (GitHub API rate limit); never in a layer.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: make refresh
 
   report:
@@ -57,6 +61,8 @@ jobs:
       issues: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
       - name: Open or update the weekly issue
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
