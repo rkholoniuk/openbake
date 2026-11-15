@@ -54,8 +54,12 @@
 # Offline: resolves requested versions against what is installed only. A
 # requested version that is not installed is missing from the output or has
 # installed=false; both count as missing below.
+# Probes that run mise run as the workspace user: anything mise writes into
+# its data dir is then user-owned and doesn't undo the chown in main.yml.
 - name: List installed Python and Node versions
   ansible.builtin.command: mise ls --current --json
+  become: true
+  become_user: "{{ ws_user }}"
   environment:
     MISE_DATA_DIR: "{{ mise_data_dir }}"
     MISE_OFFLINE: "1"
@@ -99,10 +103,3 @@
   register: runtimes_mise_reshim
   when: runtimes_mise_install is changed or not runtimes_mise_shim.stat.exists
   changed_when: runtimes_mise_reshim.rc == 0    # runs only after an install or when shims are missing
-
-- name: Let the workspace user add versions later
-  ansible.builtin.file:
-    path: "{{ mise_data_dir }}"
-    owner: "{{ ws_user }}"
-    group: "{{ ws_user }}"
-    recurse: true

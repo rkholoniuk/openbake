@@ -36,6 +36,8 @@
 # Manifest: probe versions (read-only), then write the file only when its
 # content changes.
 - name: Read installed runtime versions
+  become: true
+  become_user: "{{ ws_user }}"
   ansible.builtin.shell: |
     set -eu
     export PATH="{{ mise_data_dir }}/shims:$PATH" MISE_DATA_DIR="{{ mise_data_dir }}"
@@ -59,3 +61,12 @@
           'python_default': runtimes_v.python, 'python_versions': python_versions,
           'node_default': runtimes_v.node, 'node_versions': node_versions,
           'uv': runtimes_v.uv} | to_json }}
+
+# Last, after every step that may write into the mise data dir as root.
+- name: Let the workspace user add versions later
+  ansible.builtin.file:
+    path: "{{ mise_data_dir }}"
+    owner: "{{ ws_user }}"
+    group: "{{ ws_user }}"
+    recurse: true
+  when: runtimes_installer == 'mise'
