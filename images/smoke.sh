@@ -14,7 +14,7 @@ images=("$@")
 failures=0
 check() {  # check <profile> <description> <command>
   local ref="${prefix}ws-$1:$tag" what="$2" cmd="$3"
-  if out=$(docker run --rm "$ref" bash -lc "$cmd" 2>&1); then
+  if out=$(docker run --rm "$ref" bash -o pipefail -lc "$cmd" 2>&1); then
     printf '  ok    %-28s %s\n' "$what" "$(echo "$out" | tail -1)"
   else
     printf '  FAIL  %-28s\n%s\n' "$what" "$(echo "$out" | sed 's/^/        /' | tail -15)"

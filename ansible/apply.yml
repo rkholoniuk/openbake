@@ -21,6 +21,13 @@
     ws_profile: ""
     ws_profiles_dir: "{{ playbook_dir }}/profiles"
   pre_tasks:
+    - name: Check the profile name
+      ansible.builtin.assert:
+        that: ws_profile is match('^[a-z0-9][a-z0-9-]*$')
+        fail_msg: "profile names are lower-case letters, digits and dashes: {{ ws_profile }}"
+        quiet: true
+      when: ws_profile | length > 0
+
     - name: Load profile {{ ws_profile }}
       ansible.builtin.include_vars:
         file: "{{ ws_profiles_dir }}/{{ ws_profile }}.yml"
@@ -40,13 +47,15 @@
         fail_msg: "pass roles (apply.sh base,git) or a profile (apply.sh - -e ws_profile=devbox)"
         quiet: true
 
-    # Profile vars sit above role defaults and below -e extra vars.
+    # Profile vars override role defaults, role vars/, play vars and inventory
+    # vars (set_fact precedence); only -e extra vars win. Fine for images; M5
+    # revisits this before host inventories carry per-host values.
     - name: Apply profile variables
       ansible.builtin.set_fact:
         "{{ item.key }}": "{{ item.value }}"
       loop: "{{ (ws_profile_data.vars | default({}, true)) | dict2items }}"
       loop_control:
-        label: "{{ item.key }}"    # names only, never values
+        label: "{{ item.key }}"    # names only at normal verbosity (-v shows values)
       when: ws_profile | length > 0
 
     # In builds /var/lib/apt/lists is a BuildKit cache mount. On a fresh builder
