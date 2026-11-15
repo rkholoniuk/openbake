@@ -1,0 +1,7 @@
+---
+name: data
+targets: [image]
+roles: [base, git, cli_tools, runtimes, postgres, data_sample]
+vars: {}
+workspace:
+  ports: {dagster: 3000, streamlit: 8501}

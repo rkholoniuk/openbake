@@ -17,7 +17,47 @@
       x86_64: { deb: amd64, gnu: x86_64, node: x64 }
       aarch64: { deb: arm64, gnu: arm64, node: arm64 }
     ws_arch: "{{ ws_arch_map[ansible_facts.architecture] }}"
+    # Profiles: ansible/profiles/<name>.yml (copied to /opt/ansible/profiles in builds).
+    ws_profile: ""
+    ws_profiles_dir: "{{ playbook_dir }}/profiles"
   pre_tasks:
+    - name: Check the profile name
+      ansible.builtin.assert:
+        that: ws_profile is match('^[a-z0-9][a-z0-9-]*$')
+        fail_msg: "profile names are lower-case letters, digits and dashes: {{ ws_profile }}"
+        quiet: true
+      when: ws_profile | length > 0
+
+    - name: Load profile {{ ws_profile }}
+      ansible.builtin.include_vars:
+        file: "{{ ws_profiles_dir }}/{{ ws_profile }}.yml"
+        name: ws_profile_data
+      when: ws_profile | length > 0
+
+    - name: Check the profile allows target {{ ws_target }}
+      ansible.builtin.assert:
+        that: ws_target in ws_profile_data.targets
+        fail_msg: "profile {{ ws_profile }} allows targets {{ ws_profile_data.targets }}, not {{ ws_target }}"
+        quiet: true
+      when: ws_profile | length > 0
+
+    - name: Need roles or a profile
+      ansible.builtin.assert:
+        that: ws_roles is defined or ws_profile | length > 0
+        fail_msg: "pass roles (apply.sh base,git) or a profile (apply.sh - -e ws_profile=devbox)"
+        quiet: true
+
+    # Profile vars override role defaults, role vars/, play vars and inventory
+    # vars (set_fact precedence); only -e extra vars win. Fine for images; M5
+    # revisits this before host inventories carry per-host values.
+    - name: Apply profile variables
+      ansible.builtin.set_fact:
+        "{{ item.key }}": "{{ item.value }}"
+      loop: "{{ (ws_profile_data.vars | default({}, true)) | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"    # names only at normal verbosity (-v shows values)
+      when: ws_profile | length > 0
+
     # In builds /var/lib/apt/lists is a BuildKit cache mount. On a fresh builder
     # (new CI runner, pruned cache) it starts empty while cached layers above it
     # are restored, and roles' cache_valid_time would then skip `apt update`.
@@ -43,6 +83,7 @@
     - name: Apply role
       ansible.builtin.include_role:
         name: "{{ ws_role | trim }}"
-      loop: "{{ ws_roles.split(',') }}"
+      # Explicit roles win; otherwise all roles of the profile.
+      loop: "{{ ws_roles.split(',') if ws_roles is defined else ws_profile_data.roles }}"
       loop_control:
         loop_var: ws_role

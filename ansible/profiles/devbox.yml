@@ -1,0 +1,10 @@
+---
+name: devbox
+# host is added once base is host-safe (M4) and make host exists (M5): today
+# base removes the ubuntu user and adds a sudo rule, which is only right in images.
+targets: [image]
+roles: [base, git, cli_tools, runtimes, neovim, code_server]
+# Extensions are added once M3 pins them (version + sha256 in versions.yml).
+vars: {}
+workspace:
+  ports: {code-server: 13337}

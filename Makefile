@@ -4,7 +4,7 @@
 #   make image                       build devbox, data and agent for this machine
 #   make image PROFILE=agent         build one image (or several: PROFILE="minimal agent")
 #   make smoke [PROFILE=devbox]      check images
-#   make lint                        yamllint, ansible-lint, --syntax-check, actionlint, shellcheck
+#   make lint                        yamllint, profiles consistency, ansible-lint, --syntax-check, actionlint, shellcheck
 #   make check [PROFILE=devbox]      re-apply an image's roles with --check: must report changed=0
 #   make scan [PROFILE=devbox]       Trivy gate: fails on CRITICAL vulnerabilities with a fix, or secrets
 #   make ci [PROFILE=devbox]         everything CI runs, in the same order (lint image smoke check scan)
@@ -30,11 +30,6 @@ ref = $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$(1):$(WS_TAG)
 .DEFAULT_GOAL := help
 .PHONY: help image smoke lint check check-ci scan ci refresh custom run-devbox run-data run-agent prune-cache
 
-# Roles per image, in layer order (replaced by ansible/profiles/*.yml in M2).
-ROLES_minimal := base,git
-ROLES_devbox  := base,git,runtimes,neovim,code_server
-ROLES_data    := base,git,runtimes,postgres,data_sample
-ROLES_agent   := base,git,runtimes,agents
 LINT_IMAGE    = $(call ref,lint)
 SCAN_IMAGE    = $(call ref,scan)
 SCAN_PROFILES ?= minimal devbox data agent
@@ -62,6 +57,7 @@ lint:
 	docker run --rm -v "$(CURDIR):/src:ro" -e ANSIBLE_ROLES_PATH=/src/custom/roles:/src/ansible/roles \
 	  -e ANSIBLE_CONFIG=/src/ansible/ansible.cfg -e HOME=/tmp $(LINT_IMAGE) sh -euc '\
 	    echo "== yamllint"; yamllint --strict .; \
+	    echo "== profiles consistency"; python3 scripts/profiles-consistency.py; \
 	    echo "== ansible-playbook --syntax-check"; \
 	    ansible-playbook --syntax-check -i localhost, ansible/apply.yml -e ws_roles=base; \
 	    ansible-playbook --syntax-check -i localhost, tests/syntax-check.yml; \
@@ -94,11 +90,9 @@ ci:
 # Builds the `check` stage on top of the image stage (from the build cache: run make image first).
 check:
 	@for p in $(or $(PROFILE),minimal devbox data agent); do \
-	  roles="$$(case $$p in minimal) echo '$(ROLES_minimal)';; devbox) echo '$(ROLES_devbox)';; \
-	    data) echo '$(ROLES_data)';; agent) echo '$(ROLES_agent)';; esac)"; \
-	  test -n "$$roles" || { echo "make check: unknown profile $$p" >&2; exit 2; }; \
-	  echo "== check mode: $$p ($$roles)"; \
-	  WS_CUSTOM_FROM=$$p WS_CHECK_ROLES=$$roles $(BAKE_NOLOAD) check || exit 1; \
+	  test -f "ansible/profiles/$$p.yml" || { echo "make check: no profile ansible/profiles/$$p.yml" >&2; exit 2; }; \
+	  echo "== check mode: $$p"; \
+	  WS_CUSTOM_FROM=$$p WS_CHECK_PROFILE=$$p $(BAKE_NOLOAD) check || exit 1; \
 	done
 
 # Trivy runs in a container and reads images through the Docker socket.

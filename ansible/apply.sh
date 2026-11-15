@@ -3,6 +3,10 @@
 #
 #   apply.sh base,git            # roles, comma-separated
 #   apply.sh runtimes -e '{"node_versions": ["24"]}'
+#   apply.sh - -e ws_profile=devbox   # "-": all roles of the profile
+#
+# With -e ws_profile=<name>, apply.yml loads ansible/profiles/<name>.yml: it
+# refuses a target the profile doesn't list and applies the profile's vars.
 #
 # Runs inside `docker build` (Ansible is bind-mounted, never baked in) and also
 # works in a live workspace or on a VM with the same roles.
@@ -15,7 +19,7 @@
 set -eu
 
 if [ $# -lt 1 ] || [ -z "$1" ]; then
-  echo "usage: apply.sh <role>[,<role>...] [ansible-playbook args]" >&2
+  echo "usage: apply.sh <role>[,<role>...]|- [ansible-playbook args]" >&2
   exit 2
 fi
 roles="$1"
@@ -47,5 +51,9 @@ if [ -z "${GITHUB_TOKEN:-}" ] && [ -s /run/secrets/github_token ]; then
 fi
 
 export ANSIBLE_CONFIG="$here/ansible.cfg"
-exec "$here/venv/bin/ansible-playbook" "$here/apply.yml" \
-  -e "ws_roles=$roles" -e "@$vars_file" "$@"
+if [ "$roles" = "-" ]; then
+  set -- -e "@$vars_file" "$@"
+else
+  set -- -e "ws_roles=$roles" -e "@$vars_file" "$@"
+fi
+exec "$here/venv/bin/ansible-playbook" "$here/apply.yml" "$@"

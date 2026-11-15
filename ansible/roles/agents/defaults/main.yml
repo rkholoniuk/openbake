@@ -7,7 +7,8 @@ claude_code_version: "2.1.322"
 
 agents_prefix: /opt/agents
 agents_node_min_major: 22          # Claude Code's npm package requires Node >= 22
-agents_packages: [ripgrep, jq, git]
+# ripgrep comes from cli_tools, jq from base.
+agents_packages: [git]
 
 agents_npm_packages:
   codex: "@openai/codex@{{ codex_version }}"

@@ -1,0 +1,7 @@
+---
+name: minimal
+targets: [image]
+roles: [base, git, cli_tools]
+vars: {}
+workspace:
+  ports: {}

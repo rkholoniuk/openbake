@@ -14,7 +14,7 @@ images=("$@")
 failures=0
 check() {  # check <profile> <description> <command>
   local ref="${prefix}ws-$1:$tag" what="$2" cmd="$3"
-  if out=$(docker run --rm "$ref" bash -lc "$cmd" 2>&1); then
+  if out=$(docker run --rm "$ref" bash -o pipefail -lc "$cmd" 2>&1); then
     printf '  ok    %-28s %s\n' "$what" "$(echo "$out" | tail -1)"
   else
     printf '  FAIL  %-28s\n%s\n' "$what" "$(echo "$out" | sed 's/^/        /' | tail -15)"
@@ -29,6 +29,9 @@ for image in "${images[@]}"; do
   check "$image" "git"                   'git --version'
   check "$image" "no ansible in image"   '! command -v ansible-playbook && ! test -e /opt/ansible && echo absent'
   check "$image" "python"                'python3 --version'
+  check "$image" "cli tools"             'for t in rg fd bat tmux direnv jq; do command -v $t >/dev/null || { echo "missing $t"; exit 1; }; done; echo rg fd bat tmux direnv jq'
+  check "$image" "yq"                    'yq --version'
+  check "$image" "gh"                    'gh --version | head -1'
   check "$image" "uv (if runtimes)"      'if test -f /etc/ws-image/runtimes.json; then uv --version; else echo "n/a, no runtimes role"; fi'
   case "$image" in
     devbox)

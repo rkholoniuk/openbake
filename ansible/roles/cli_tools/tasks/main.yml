@@ -1,0 +1,124 @@
+---
+- name: Check the target is supported
+  ansible.builtin.assert:
+    that: ws_target in cli_tools_role_targets
+    fail_msg: "cli_tools does not support ws_target={{ ws_target }}"
+    quiet: true
+
+- name: Install command-line tools
+  ansible.builtin.apt:
+    name: "{{ cli_tools_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+# Ubuntu renames these binaries (fdfind, batcat); expose the upstream names.
+# In a check-mode preview on a fresh machine apt only simulates the install,
+# so the link targets don't exist yet: link with force, which the file module
+# accepts for a missing source (the real run then points at the installed file).
+- name: Expose fd and bat under their upstream names
+  ansible.builtin.file:
+    src: "/usr/bin/{{ item.src }}"
+    dest: "/usr/local/bin/{{ item.dest }}"
+    state: link
+    force: "{{ ansible_check_mode }}"
+  loop:
+    - { src: fdfind, dest: fd }
+    - { src: batcat, dest: bat }
+
+# Probe, then act: the download cache may be empty and is not state.
+- name: Find installed yq and gh
+  ansible.builtin.stat:
+    path: "/usr/local/bin/{{ item }}"
+  loop: [yq, gh]
+  register: cli_tools_bins
+
+- name: Read installed yq and gh versions
+  ansible.builtin.command: "/usr/local/bin/{{ item.item }} --version"
+  loop: "{{ cli_tools_bins.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+  register: cli_tools_installed
+  changed_when: false
+  check_mode: false
+
+# Exact version tokens: "yq (https://github.com/mikefarah/yq/) version v4.54.3",
+# "gh version 2.104.0 (2026-...)".
+- name: Work out which binaries need installing
+  ansible.builtin.set_fact:
+    cli_tools_yq_current: >-
+      {{ (cli_tools_installed.results[0].stdout | default('')).split() | last | default('') == 'v' ~ cli_tools_yq_version }}
+    cli_tools_gh_current: >-
+      {{ ((cli_tools_installed.results[1].stdout_lines | default(['']))[0].split() + ['', '', ''])[2] == cli_tools_gh_version }}
+
+- name: Install yq {{ cli_tools_yq_version }}
+  when: not cli_tools_yq_current | bool
+  block:
+    - name: Create download cache
+      ansible.builtin.file:
+        path: "{{ ws_download_cache }}/cli_tools"
+        state: directory
+        mode: "0755"
+
+    - name: Download yq
+      ansible.builtin.get_url:
+        url: "https://github.com/mikefarah/yq/releases/download/v{{ cli_tools_yq_version }}/yq_linux_{{ ws_arch.deb }}"
+        dest: "{{ ws_download_cache }}/cli_tools/yq-{{ cli_tools_yq_version }}-{{ ws_arch.deb }}"
+        checksum: "{{ cli_tools_yq_checksums[ws_arch.deb] }}"
+        mode: "0755"
+
+    # In check mode get_url only simulates the download, so the file may not
+    # exist: report the pending install instead of copying a missing file.
+    - name: Report pending yq install (check mode)
+      ansible.builtin.debug:
+        msg: "would install yq {{ cli_tools_yq_version }}"
+      changed_when: true
+      when: ansible_check_mode
+
+    - name: Install yq binary
+      when: not ansible_check_mode
+      ansible.builtin.copy:
+        src: "{{ ws_download_cache }}/cli_tools/yq-{{ cli_tools_yq_version }}-{{ ws_arch.deb }}"
+        dest: /usr/local/bin/yq
+        remote_src: true
+        mode: "0755"
+
+- name: Install gh {{ cli_tools_gh_version }}
+  when: not cli_tools_gh_current | bool
+  block:
+    - name: Create download cache
+      ansible.builtin.file:
+        path: "{{ ws_download_cache }}/cli_tools"
+        state: directory
+        mode: "0755"
+
+    - name: Download gh
+      ansible.builtin.get_url:
+        url: "https://github.com/cli/cli/releases/download/v{{ cli_tools_gh_version }}/gh_{{ cli_tools_gh_version }}_linux_{{ ws_arch.deb }}.tar.gz"
+        dest: "{{ ws_download_cache }}/cli_tools/gh-{{ cli_tools_gh_version }}-{{ ws_arch.deb }}.tar.gz"
+        checksum: "{{ cli_tools_gh_checksums[ws_arch.deb] }}"
+        mode: "0644"
+
+    - name: Report pending gh install (check mode)
+      ansible.builtin.debug:
+        msg: "would install gh {{ cli_tools_gh_version }}"
+      changed_when: true
+      when: ansible_check_mode
+
+    - name: Install gh binary
+      when: not ansible_check_mode
+      ansible.builtin.unarchive:
+        src: "{{ ws_download_cache }}/cli_tools/gh-{{ cli_tools_gh_version }}-{{ ws_arch.deb }}.tar.gz"
+        dest: /usr/local/bin
+        remote_src: true
+        extra_opts: [--strip-components=2, "gh_{{ cli_tools_gh_version }}_linux_{{ ws_arch.deb }}/bin/gh"]
+
+- name: Record role in image manifest
+  ansible.builtin.copy:
+    dest: /etc/ws-image/cli_tools.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'cli_tools', 'packages': cli_tools_packages,
+          'yq': cli_tools_yq_version, 'gh': cli_tools_gh_version} | to_json }}
