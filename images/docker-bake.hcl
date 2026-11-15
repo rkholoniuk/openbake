@@ -20,7 +20,7 @@ variable "WS_BASE_IMAGE" { default = "ubuntu:24.04" }
 variable "WS_RUNTIMES_INSTALLER" { default = "" }   # mise | system
 variable "WS_PYTHON_VERSIONS" { default = "" }      # e.g. ["3.13","3.12"]  (first = default)
 variable "WS_NODE_VERSIONS" { default = "" }        # e.g. ["24"]
-variable "WS_NEOVIM_VERSION" { default = "" }       # e.g. v0.11.5
+variable "WS_NEOVIM_VERSION" { default = "" }       # needs a matching entry in neovim_checksums
 variable "WS_CODE_SERVER_VERSION" { default = "" }
 variable "WS_CODE_SERVER_EXTENSIONS" { default = "" }  # e.g. ["ms-python.python"]
 variable "WS_CODEX_VERSION" { default = "" }

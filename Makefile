@@ -8,6 +8,8 @@
 #   make check [PROFILE=devbox]      re-apply an image's roles with --check: must report changed=0
 #   make scan [PROFILE=devbox]       Trivy gate: fails on CRITICAL vulnerabilities with a fix, or secrets
 #   make ci [PROFILE=devbox]         everything CI runs, in the same order (lint image smoke check scan)
+#   make refresh [PROFILE=devbox]    rebuild from scratch (new base image + current security updates),
+#                                    then smoke, check and scan. A plain `make image` reuses cached layers.
 #   make custom FROM=agent ROLES=hello_custom [VARS='{"hello_custom_packages":["htop"]}']
 #   make run-devbox                  code-server on http://127.0.0.1:13337 (PASSWORD=...)
 #   make run-data | run-agent        temporary until `make up` (M6)
@@ -26,7 +28,7 @@ export WS_REGISTRY WS_TAG
 ref = $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$(1):$(WS_TAG)
 
 .DEFAULT_GOAL := help
-.PHONY: help image smoke lint check check-ci scan ci custom run-devbox run-data run-agent prune-cache
+.PHONY: help image smoke lint check check-ci scan ci refresh custom run-devbox run-data run-agent prune-cache
 
 # Roles per image, in layer order (replaced by ansible/profiles/*.yml in M2).
 ROLES_minimal := base,git
@@ -68,7 +70,7 @@ lint:
 	    echo "== actions pinned to commit SHAs"; \
 	    if grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; then \
 	      echo "unpinned action(s) above: pin to a full commit SHA" >&2; exit 1; fi; \
-	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh \
+	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh .github/scripts/*.sh \
 	      ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info'
 
 # check with the CI policy (blocking vs report-only), limited to PROFILE when given.
@@ -111,6 +113,15 @@ scan:
 	  $(TRIVY) --scanners vuln --severity CRITICAL --ignore-unfixed "$$img" || exit 1; \
 	  $(TRIVY) --scanners secret "$$img" || exit 1; \
 	done
+
+# Patching: --pull fetches the newest ubuntu:24.04, --no-cache re-runs every
+# role so apt installs today's security updates. The weekly workflow runs this.
+REFRESH_PROFILES ?= minimal devbox data agent
+refresh:
+	$(MAKE) image PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))" BAKE_ARGS="$(BAKE_ARGS) --pull --no-cache"
+	$(MAKE) smoke PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))"
+	$(MAKE) check PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))" BAKE_ARGS="$(BAKE_ARGS) --pull"
+	$(MAKE) scan PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))"
 
 custom:
 	@test -n "$(ROLES)" || { echo "usage: make custom FROM=<profile> ROLES=<role>[,<role>]" >&2; exit 2; }
