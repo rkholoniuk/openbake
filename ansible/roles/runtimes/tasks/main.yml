@@ -1,0 +1,72 @@
+---
+- name: Check installer choice
+  ansible.builtin.assert:
+    that: runtimes_installer in ['mise', 'system']
+    fail_msg: "runtimes_installer must be 'mise' or 'system', got '{{ runtimes_installer }}'"
+    quiet: true
+
+- name: Install with mise
+  ansible.builtin.include_tasks: mise.yml
+  when: runtimes_installer == 'mise'
+
+- name: Install from distro packages
+  ansible.builtin.include_tasks: system.yml
+  when: runtimes_installer == 'system'
+
+# uv comes from PyPI on both paths: one wheel, no GitHub download.
+- name: Install python3-venv for the uv venv
+  ansible.builtin.apt:
+    name: python3-venv
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Install uv into /opt/uv
+  ansible.builtin.shell: |
+    set -eu
+    python3 -m venv /opt/uv
+    /opt/uv/bin/pip install --quiet "uv=={{ uv_version }}"
+    ln -sf /opt/uv/bin/uv /usr/local/bin/uv
+    ln -sf /opt/uv/bin/uvx /usr/local/bin/uvx
+  args:
+    executable: /bin/bash
+    creates: /opt/uv/bin/uv
+
+# Manifest: probe versions (read-only), then write the file only when its
+# content changes.
+- name: Read installed runtime versions
+  become: true
+  become_user: "{{ ws_user }}"
+  ansible.builtin.shell: |
+    set -eu
+    export PATH="{{ mise_data_dir }}/shims:$PATH" MISE_DATA_DIR="{{ mise_data_dir }}"
+    echo "python=$( (python3 --version 2>&1 || true) | awk '{print $2}')"
+    echo "node=$(node --version 2>/dev/null || echo none)"
+    echo "uv=$( (uv --version 2>/dev/null || echo "uv none") | awk '{print $2}')"
+  args:
+    executable: /bin/bash
+  register: runtimes_versions
+  changed_when: false
+  check_mode: false
+
+- name: Record role in image manifest
+  vars:
+    runtimes_v: "{{ dict(runtimes_versions.stdout_lines | map('split', '=', 1)) }}"
+  ansible.builtin.copy:
+    dest: /etc/ws-image/runtimes.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'runtimes', 'installer': runtimes_installer,
+          'python_default': runtimes_v.python, 'python_versions': python_versions,
+          'node_default': runtimes_v.node, 'node_versions': node_versions,
+          'uv': runtimes_v.uv} | to_json }}
+
+# Last, after every step that may write into the mise data dir as root.
+- name: Let the workspace user add versions later
+  ansible.builtin.file:
+    path: "{{ mise_data_dir }}"
+    owner: "{{ ws_user }}"
+    group: "{{ ws_user }}"
+    recurse: true
+  when: runtimes_installer == 'mise'

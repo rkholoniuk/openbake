@@ -1,0 +1,48 @@
+---
+- name: Apply workspace roles
+  hosts: localhost
+  connection: local
+  gather_facts: true
+  gather_subset: [min]
+  vars:
+    # image: inside `docker build`; host: a real machine (roles assert what they support).
+    ws_target: host
+    # Shared by all roles; override with WSV_WS_USER etc. if you need another user.
+    ws_user: user
+    ws_uid: 1000
+    ws_home: /home/user
+    ws_workspace: /home/user/workspace
+    ws_download_cache: /var/cache/ws
+    ws_arch_map:
+      x86_64: { deb: amd64, gnu: x86_64, node: x64 }
+      aarch64: { deb: arm64, gnu: arm64, node: arm64 }
+    ws_arch: "{{ ws_arch_map[ansible_facts.architecture] }}"
+  pre_tasks:
+    # In builds /var/lib/apt/lists is a BuildKit cache mount. On a fresh builder
+    # (new CI runner, pruned cache) it starts empty while cached layers above it
+    # are restored, and roles' cache_valid_time would then skip `apt update`.
+    - name: Find apt package lists
+      ansible.builtin.find:
+        paths: /var/lib/apt/lists
+        patterns: "*_Packages*"
+      register: ws_apt_lists
+      check_mode: false
+      when: ansible_facts.os_family == 'Debian'
+
+    # Cache-only: it does not change what the image or host has installed, so it
+    # also runs in check mode and never counts as a change.
+    - name: Refresh apt package lists when they are empty
+      ansible.builtin.apt:
+        update_cache: true
+      check_mode: false
+      changed_when: false
+      when:
+        - ansible_facts.os_family == 'Debian'
+        - ws_apt_lists.matched == 0
+  tasks:
+    - name: Apply role
+      ansible.builtin.include_role:
+        name: "{{ ws_role | trim }}"
+      loop: "{{ ws_roles.split(',') }}"
+      loop_control:
+        loop_var: ws_role

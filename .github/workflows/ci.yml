@@ -1,0 +1,86 @@
+---
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# CI is a thin wrapper: every step is a make target that runs the same way
+# locally (`make ci` runs them all). Workflows only add runners, the arch
+# matrix and caching. Every action is pinned to a full commit SHA (tags can be
+# moved, see CVE-2026-33634); `make lint` rejects unpinned `uses:` lines.
+# Renovate (M3) proposes updates.
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      # yamllint, --syntax-check, ansible-lint, actionlint and shellcheck, inside the lint image.
+      - name: make lint
+        run: make lint
+
+  images:
+    needs: lint
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    env:
+      # Mounted as a BuildKit secret (raises GitHub's API rate limit for mise); never in a layer.
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      # Four ~2 GB images plus the BuildKit cache don't fit in the runner's free
+      # space; drop preinstalled toolchains we never use (~25 GB).
+      - name: Free disk space
+        run: |
+          df -h /
+          sudo rm -rf /usr/local/lib/android /usr/share/dotnet /opt/ghc /usr/local/.ghcup \
+            /opt/hostedtoolcache /usr/local/share/boost /usr/share/swift
+          sudo docker image prune --all --force > /dev/null
+          df -h /
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+        with:
+          # Exact buildx and BuildKit (by digest), not the action's moving defaults.
+          version: v0.39.0
+          driver-opts: image=moby/buildkit:v0.35.0@sha256:aa632b921ef07411d2cb77292cd34213d4f7b384001d6fceef1e1f25bf9752bb
+      # Exposes the cache service variables to `run:` steps for type=gha caching.
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487  # v4.0.0
+
+      - name: Build images
+        run: |
+          # One bake call per profile, so each gets its own cache scope.
+          for p in minimal devbox data agent; do
+            scope="${{ matrix.runner }}-$p"
+            make image PROFILE=$p BAKE_ARGS="--set *.cache-from=type=gha,scope=$scope --set *.cache-to=type=gha,mode=max,scope=$scope"
+          done
+
+      - name: Smoke
+        run: make smoke PROFILE="minimal devbox data agent"
+
+      # Re-apply each image's roles with --check --diff: must report changed=0.
+      # Blocking for CHECK_BLOCKING, warnings for CHECK_REPORT_ONLY (Makefile),
+      # the same policy `make ci` uses.
+      - name: Check mode
+        run: make check-ci PROFILE="minimal devbox data agent"
+
+      # Gate: CRITICAL vulnerabilities with a fix available, and secrets in layers.
+      - name: Trivy scan
+        run: make scan PROFILE="minimal devbox data agent"
+
+      - name: Custom image
+        run: |
+          make custom FROM=devbox ROLES=hello_custom
+          make smoke PROFILE=custom CUSTOM_ROLES=hello_custom

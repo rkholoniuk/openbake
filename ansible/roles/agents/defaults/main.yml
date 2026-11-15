@@ -1,0 +1,14 @@
+---
+# Which coding-agent CLIs to install. Both ship native binaries through npm.
+agents: [codex, claude_code]
+
+codex_version: "0.167.1"
+claude_code_version: "2.1.322"
+
+agents_prefix: /opt/agents
+agents_node_min_major: 22          # Claude Code's npm package requires Node >= 22
+agents_packages: [ripgrep, jq, git]
+
+agents_npm_packages:
+  codex: "@openai/codex@{{ codex_version }}"
+  claude_code: "@anthropic-ai/claude-code@{{ claude_code_version }}"

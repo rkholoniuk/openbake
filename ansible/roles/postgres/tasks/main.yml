@@ -1,0 +1,60 @@
+---
+- name: Install PostgreSQL
+  ansible.builtin.apt:
+    name: "{{ postgres_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+# The package creates a root-managed cluster for systemd. A workspace has no
+# systemd and runs as the user, so drop it and use ws-postgres instead.
+- name: List packaged clusters
+  ansible.builtin.command: pg_lsclusters -h
+  register: postgres_clusters
+  changed_when: false
+  failed_when: false    # not installed yet in a check-mode preview
+  check_mode: false
+
+- name: Remove the packaged cluster
+  ansible.builtin.command: pg_dropcluster --stop {{ item.split()[0] }} {{ item.split()[1] }}
+  loop: "{{ postgres_clusters.stdout_lines | default([]) }}"
+  register: postgres_drop
+  changed_when: postgres_drop.rc == 0
+
+# The ssl-cert package (a PostgreSQL dependency) generates a "snakeoil" key pair
+# at install time. Baked into an image, every container would share that
+# private key. ws-postgres runs its own cluster without SSL, so remove it.
+- name: Remove the build-time snakeoil key pair
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/ssl/private/ssl-cert-snakeoil.key
+    - /etc/ssl/certs/ssl-cert-snakeoil.pem
+  when: ws_target == 'image'
+
+- name: Install ws-postgres
+  ansible.builtin.copy:
+    src: ws-postgres
+    dest: /usr/local/bin/ws-postgres
+    mode: "0755"
+
+- name: Read installed PostgreSQL version
+  ansible.builtin.shell: |
+    set -eu
+    bin=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)
+    "$bin/postgres" --version | awk '{print $3}'
+  args:
+    executable: /bin/bash
+  register: postgres_version_out
+  changed_when: false
+  failed_when: false    # not installed yet in a check-mode preview
+  check_mode: false
+
+- name: Record role in image manifest
+  ansible.builtin.copy:
+    dest: /etc/ws-image/postgres.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'postgres', 'postgres': postgres_version_out.stdout | default('none', true)} | to_json }}

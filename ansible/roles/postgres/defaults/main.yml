@@ -1,0 +1,4 @@
+---
+# Ubuntu 24.04 ships PostgreSQL 16. For other majors add the PGDG apt repo
+# (apt.postgresql.org) and list e.g. postgresql-17 here.
+postgres_packages: [postgresql, postgresql-contrib, postgresql-client]

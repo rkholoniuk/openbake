@@ -1,0 +1,18 @@
+---
+# mise    selectable Python/Node versions (prebuilt binaries), shared under /opt/mise
+# system  distro packages only (versions not selectable); air-gapped or minimal builds
+runtimes_installer: mise
+
+# First entry is the default on PATH.
+python_versions: ["3.12", "3.13"]
+node_versions: ["24", "22"]
+
+mise_version: "2026.11.6"
+mise_url: "https://github.com/jdx/mise/releases/download/v{{ mise_version }}/mise-v{{ mise_version }}-linux-{{ ws_arch.node }}"
+mise_checksum: ""            # e.g. "sha256:<hex>" to pin the binary
+mise_data_dir: /opt/mise
+# Extra environment for `mise install`, e.g. mirrors for air-gapped builds:
+#   MISE_NODE_MIRROR_URL: https://mirror.example.com/nodejs/
+runtimes_mise_env: {}
+
+uv_version: "0.13.7"          # installed from PyPI (honours PIP_INDEX_URL)

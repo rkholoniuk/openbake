@@ -1,0 +1,67 @@
+#!/bin/sh
+# ws-postgres start|stop|status|url
+#
+# A per-user PostgreSQL cluster for development, kept in the home volume.
+#
+#   PGDATA            data directory          (default ~/.local/share/postgres)
+#   PGPORT            port                    (default 5432)
+#   WS_PG_PASSWORD    password for TCP logins (default "dev")
+#   WS_PG_DATABASES   databases to create     (default: the user name)
+#   WS_PG_LISTEN      listen_addresses        (default localhost)
+#
+# Local socket logins are trusted; TCP logins need the password.
+set -eu
+
+PGBIN="$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)"
+PGDATA="${PGDATA:-$HOME/.local/share/postgres}"
+PGPORT="${PGPORT:-5432}"
+PGUSER="$(id -un)"
+PASSWORD="${WS_PG_PASSWORD:-dev}"
+DATABASES="${WS_PG_DATABASES:-$PGUSER}"
+LISTEN="${WS_PG_LISTEN:-localhost}"
+SOCKDIR="${WS_PG_SOCKET_DIR:-/tmp}"
+LOG="$(dirname "$PGDATA")/postgres.log"
+export PGDATA PGPORT
+
+cmd="${1:-}"
+case "$cmd" in
+start)
+  if [ ! -s "$PGDATA/PG_VERSION" ]; then
+    mkdir -p "$PGDATA"
+    chmod 700 "$PGDATA"
+    pwfile="$(mktemp)"
+    printf '%s\n' "$PASSWORD" > "$pwfile"
+    "$PGBIN/initdb" -D "$PGDATA" -U "$PGUSER" --pwfile="$pwfile" \
+      --auth-local=trust --auth-host=scram-sha-256 --encoding=UTF8 >/dev/null
+    rm -f "$pwfile"
+  fi
+  if "$PGBIN/pg_ctl" status -D "$PGDATA" >/dev/null 2>&1; then
+    echo "postgres already running on port $PGPORT"
+  else
+    "$PGBIN/pg_ctl" start -D "$PGDATA" -l "$LOG" -w \
+      -o "-p $PGPORT -k $SOCKDIR -c listen_addresses=$LISTEN" >/dev/null
+    echo "postgres started on port $PGPORT (log: $LOG)"
+  fi
+  for db in $(echo "$DATABASES" | tr ',' ' '); do
+    if ! "$PGBIN/psql" -h "$SOCKDIR" -p "$PGPORT" -d postgres -tAc \
+        "SELECT 1 FROM pg_database WHERE datname='$db'" | grep -q 1; then
+      "$PGBIN/createdb" -h "$SOCKDIR" -p "$PGPORT" "$db"
+      echo "created database $db"
+    fi
+  done
+  ;;
+stop)
+  "$PGBIN/pg_ctl" stop -D "$PGDATA" -m fast
+  ;;
+status)
+  "$PGBIN/pg_ctl" status -D "$PGDATA"
+  ;;
+url)
+  db="${2:-$PGUSER}"
+  echo "postgresql+psycopg://$PGUSER:$PASSWORD@localhost:$PGPORT/$db"
+  ;;
+*)
+  echo "usage: ws-postgres start|stop|status|url [db]" >&2
+  exit 2
+  ;;
+esac

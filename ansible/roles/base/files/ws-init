@@ -1,0 +1,32 @@
+#!/bin/sh
+# Container entrypoint (under tini).
+#
+# A workspace home is usually a volume. Docker seeds an empty named volume from
+# the image, but Kubernetes PVCs (and tmpfs) start empty and root-owned, so on
+# first start we copy the image's skeleton (/etc/skel, which roles populate with
+# editor config, plugins and sample projects) into $HOME. Existing files are
+# never overwritten.
+#
+# WORKDIR is $HOME (always present as the mount point); we move into
+# ~/workspace here, because a runtime-created WORKDIR on an empty volume would
+# be owned by root.
+set -eu
+
+home="${HOME:-/home/user}"
+marker="$home/.ws-init-done"
+
+if [ -w "$home" ] && [ ! -e "$marker" ]; then
+  for entry in /etc/skel/* /etc/skel/.[!.]* /etc/skel/..?*; do
+    [ -e "$entry" ] || [ -L "$entry" ] || continue
+    # No ownership/timestamps: the volume root may belong to root.
+    cp -R --preserve=mode,links --update=none "$entry" "$home/"
+  done
+  mkdir -p "$home/workspace"
+  date -u +%Y-%m-%dT%H:%M:%SZ > "$marker"
+fi
+
+if [ "$(pwd)" = "$home" ] && [ -d "$home/workspace" ]; then
+  cd "$home/workspace"
+fi
+
+exec "$@"

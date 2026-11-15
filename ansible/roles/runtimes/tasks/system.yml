@@ -1,0 +1,27 @@
+---
+- name: Distro Python
+  ansible.builtin.apt:
+    name: [python3, python3-venv, python3-pip, python-is-python3, pipx]
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Check for a Node already in the base image
+  ansible.builtin.command: node --version
+  register: runtimes_existing_node
+  changed_when: false
+  failed_when: false
+
+- name: Distro Node (only if the base image has none)
+  ansible.builtin.apt:
+    name: [nodejs, npm]
+    state: present
+    install_recommends: false
+  when: runtimes_existing_node.rc != 0
+
+- name: Note that versions are not selectable on this path
+  ansible.builtin.debug:
+    msg: >-
+      runtimes_installer=system ignores python_versions={{ python_versions }} and
+      node_versions={{ node_versions }}; the distro versions are used.

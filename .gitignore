@@ -42,3 +42,13 @@ terraform.rc
 # Optional: ignore plan files saved before destroying Terraform configuration
 # Uncomment the line below if you want to ignore planout files.
 # planout
+# OpenBake
+.state/
+.tools/
+*.env
+# Real inventories stay out of git (see ansible/inventories/README.md)
+ansible/inventories/*
+!ansible/inventories/README.md
+!ansible/inventories/local/
+!ansible/inventories/test/
+!ansible/inventories/example/

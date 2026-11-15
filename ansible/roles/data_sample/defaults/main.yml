@@ -1,0 +1,6 @@
+---
+data_sample_name: streamlit-dagster
+data_sample_src: /opt/samples/streamlit-dagster          # read-only reference copy
+data_sample_venv: /opt/venvs/streamlit-dagster           # outside $HOME, shared by both copies
+data_sample_dagster_port: 3000
+data_sample_streamlit_port: 8501

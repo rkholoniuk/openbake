@@ -1,0 +1,5 @@
+---
+# Per-host overrides, e.g. an extra port for one server.
+firewall_allow:
+  - { port: 22, proto: tcp, from: any, limit: true }
+  - { port: 443, proto: tcp, from: any, limit: false }

@@ -1,0 +1,57 @@
+---
+- name: Install git tooling
+  ansible.builtin.apt:
+    name: "{{ git_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Enable git-lfs system-wide
+  ansible.builtin.command: git lfs install --system --skip-repo
+  changed_when: false
+
+- name: System git config
+  # community.general.git_config would add a collection; images use ansible-core only.
+  ansible.builtin.command: git config --system {{ item.key | quote }} {{ item.value | quote }}  # noqa: command-instead-of-module
+  loop: "{{ git_system_config | dict2items }}"
+  changed_when: false
+
+- name: Fetch GitHub SSH host keys over HTTPS
+  ansible.builtin.uri:
+    url: https://api.github.com/meta
+    return_content: true
+  register: git_github_meta
+  # Read-only GET: also run it in check mode, the next task needs the result.
+  check_mode: false
+  when: git_known_hosts_source == 'github_meta'
+
+- name: Write /etc/ssh/ssh_known_hosts
+  ansible.builtin.copy:
+    dest: /etc/ssh/ssh_known_hosts
+    mode: "0644"
+    content: |
+      {% if git_known_hosts_source == 'github_meta' %}
+      {% for key in git_github_meta.json.ssh_keys %}
+      github.com {{ key }}
+      {% endfor %}
+      {% endif %}
+      {% for line in git_known_hosts_static %}
+      {{ line }}
+      {% endfor %}
+  when: git_known_hosts_source != 'none'
+
+- name: Read installed git version
+  ansible.builtin.command: git --version  # noqa: command-instead-of-module (read-only version probe)
+  register: git_version_out
+  changed_when: false
+  failed_when: false    # not installed yet in a check-mode preview
+  check_mode: false
+
+- name: Record role in image manifest
+  ansible.builtin.copy:
+    dest: /etc/ws-image/git.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'git', 'git': (git_version_out.stdout.split()[2] if git_version_out.rc == 0 else 'none'),
+          'known_hosts': git_known_hosts_source} | to_json }}

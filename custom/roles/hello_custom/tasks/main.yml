@@ -1,0 +1,17 @@
+---
+# Example custom role. Copy this folder, rename it, and build with:
+#   make custom FROM=agent ROLES=hello_custom
+# Roles from ansible/roles (e.g. agents, postgres) can be listed too.
+- name: Install extra packages
+  ansible.builtin.apt:
+    name: "{{ hello_custom_packages }}"
+    state: present
+    install_recommends: false
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Leave a marker so the smoke test can see the role ran
+  ansible.builtin.copy:
+    dest: /etc/ws-image/hello_custom.json
+    mode: "0644"
+    content: "{{ {'role': 'hello_custom', 'packages': hello_custom_packages} | to_json }}\n"

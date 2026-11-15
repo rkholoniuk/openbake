@@ -1,0 +1,19 @@
+---
+base_packages:
+  - bash-completion
+  - ca-certificates
+  - curl
+  - wget
+  - jq
+  - less
+  - locales
+  - procps
+  - iproute2
+  - sudo
+  - tini
+  - tzdata
+  - unzip
+  - xz-utils
+  - zip
+base_extra_packages: []
+base_passwordless_sudo: true
