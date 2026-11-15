@@ -116,7 +116,7 @@
     dest: "{{ agents_prefix }}/node_modules/.ws-install-sha256"
     content: "{{ agents_wanted_marker }}\n"
     mode: "0644"
-  when: not ansible_check_mode
+  # Runs in check mode too, so a pending install or marker repair shows as changed.
 
 - name: Link agent CLIs onto PATH
   ansible.builtin.file:

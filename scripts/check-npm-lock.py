@@ -10,6 +10,8 @@
 
 Exit status 1 on any violation.
 """
+import base64
+import binascii
 import json
 import pathlib
 import sys
@@ -19,6 +21,16 @@ import yaml
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ROLE = ROOT / "ansible" / "roles" / "agents"
 REGISTRY = "https://registry.npmjs.org/"
+
+
+def valid_sha512(integrity):
+    """True for exactly one 'sha512-<base64 of 64 bytes>' entry."""
+    if not isinstance(integrity, str) or not integrity.startswith("sha512-") or " " in integrity.strip():
+        return False
+    try:
+        return len(base64.b64decode(integrity[len("sha512-"):], validate=True)) == 64
+    except (ValueError, binascii.Error):
+        return False
 
 
 def main():
@@ -38,8 +50,8 @@ def main():
         resolved = entry.get("resolved", "")
         if not resolved.startswith(REGISTRY):
             errors.append(f"{name}: resolved from {resolved or 'nowhere'}, not {REGISTRY}")
-        if not str(entry.get("integrity", "")).startswith("sha512-"):
-            errors.append(f"{name}: no sha512 integrity hash")
+        if not valid_sha512(entry.get("integrity")):
+            errors.append(f"{name}: no valid sha512 integrity hash")
         if entry.get("hasInstallScript") and name not in allowed:
             errors.append(
                 f"{name}: has an install script that is not reviewed "

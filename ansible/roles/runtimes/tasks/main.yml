@@ -62,7 +62,7 @@
     dest: /opt/uv/.ws-requirements-sha256
     content: "{{ lookup('file', 'uv-requirements.txt') | hash('sha256') }}\n"
     mode: "0644"
-  when: not ansible_check_mode
+  # Runs in check mode too, so a pending install or marker repair shows as changed.
 
 - name: Put uv and uvx on PATH
   ansible.builtin.file:

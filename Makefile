@@ -18,6 +18,11 @@
 # images/docker-bake.hcl, e.g.
 #   WS_PYTHON_VERSIONS='["3.13","3.12"]' make image PROFILE=devbox
 
+# bash with pipefail, so a failing command on the left of a pipe fails the
+# recipe (docker save | docker run in scan). bash ships with macOS and Linux.
+SHELL := bash
+.SHELLFLAGS := -o pipefail -c
+
 WS_REGISTRY ?=
 WS_TAG      ?= local
 PASSWORD    ?= change-me
