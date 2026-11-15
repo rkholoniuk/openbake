@@ -25,7 +25,7 @@ variable "WS_CODE_SERVER_VERSION" { default = "" }
 variable "WS_CODE_SERVER_EXTENSIONS" { default = "" }  # e.g. ["ms-python.python"]
 variable "WS_CODEX_VERSION" { default = "" }
 variable "WS_CLAUDE_CODE_VERSION" { default = "" }
-variable "WS_GIT_KNOWN_HOSTS_SOURCE" { default = "" }  # github_meta | static | none
+variable "WS_GIT_KNOWN_HOSTS_SOURCE" { default = "" }  # static (role default) | github_meta | none
 
 # Custom images: start from a curated stage and add roles (yours live in custom/roles).
 variable "WS_CUSTOM_FROM" { default = "devbox" }

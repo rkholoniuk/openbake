@@ -8,10 +8,11 @@
     directory_mode: "0755"
 
 # uv resolves from the lock file only; it uses the Python on PATH
-# (mise or distro) and never downloads one.
-- name: Create the project environment
-  ansible.builtin.command: uv sync --frozen --no-dev --project {{ data_sample_src }}
-  environment:
+# (mise or distro) and never downloads one. `--check` only compares the
+# environment with the lock file, so it is safe in check mode.
+- name: Check the project environment against uv.lock
+  ansible.builtin.command: uv sync --frozen --no-dev --check --project {{ data_sample_src }}
+  environment: &data_sample_uv_env
     PATH: "/opt/mise/shims:{{ ansible_env.PATH }}"
     MISE_DATA_DIR: /opt/mise
     UV_PROJECT_ENVIRONMENT: "{{ data_sample_venv }}"
@@ -19,7 +20,20 @@
     UV_LINK_MODE: copy
     UV_PYTHON_DOWNLOADS: never
     UV_PYTHON_PREFERENCE: only-system
-  changed_when: true
+    # Python run as root would leave root-owned __pycache__ in the venv and the
+    # mise Python install, undoing the chown steps (check mode then reports a change).
+    PYTHONDONTWRITEBYTECODE: "1"
+  register: data_sample_uv_check
+  changed_when: false
+  failed_when: false    # non-zero means "not in sync"
+  check_mode: false
+
+- name: Create the project environment
+  ansible.builtin.command: uv sync --frozen --no-dev --project {{ data_sample_src }}
+  environment: *data_sample_uv_env
+  register: data_sample_uv_sync
+  when: data_sample_uv_check.rc != 0
+  changed_when: data_sample_uv_sync.rc == 0    # runs only when out of sync
 
 - name: Let the workspace user add packages
   ansible.builtin.file:
@@ -63,15 +77,25 @@
     dest: /usr/local/bin/ws-sample-data
     mode: "0755"
 
+- name: Read sample environment versions
+  become: true
+  become_user: "{{ ws_user }}"
+  environment:
+    PYTHONDONTWRITEBYTECODE: "1"
+  ansible.builtin.command: >-
+    {{ data_sample_venv }}/bin/python -c
+    "import platform, dagster, streamlit; print(platform.python_version(), dagster.__version__, streamlit.__version__)"
+  register: data_sample_versions
+  changed_when: false
+  failed_when: false    # environment not created yet in a check-mode preview
+  check_mode: false
+
 - name: Record role in image manifest
-  ansible.builtin.shell: |
-    set -eu
-    v={{ data_sample_venv }}/bin
-    printf '{"role":"data_sample","python":"%s","dagster":"%s","streamlit":"%s"}\n' \
-      "$($v/python --version | awk '{print $2}')" \
-      "$($v/python -c 'import dagster; print(dagster.__version__)')" \
-      "$($v/python -c 'import streamlit; print(streamlit.__version__)')" > /etc/ws-image/data_sample.json
-    cat /etc/ws-image/data_sample.json
-  args:
-    executable: /bin/bash
-  changed_when: true
+  vars:
+    data_sample_v: "{{ (data_sample_versions.stdout | default('none none none', true)).split() }}"
+  ansible.builtin.copy:
+    dest: /etc/ws-image/data_sample.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'data_sample', 'python': data_sample_v[0], 'dagster': data_sample_v[1],
+          'streamlit': data_sample_v[2]} | to_json }}

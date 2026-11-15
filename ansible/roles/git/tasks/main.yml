@@ -41,11 +41,17 @@
       {% endfor %}
   when: git_known_hosts_source != 'none'
 
+- name: Read installed git version
+  ansible.builtin.command: git --version  # noqa: command-instead-of-module (read-only version probe)
+  register: git_version_out
+  changed_when: false
+  failed_when: false    # not installed yet in a check-mode preview
+  check_mode: false
+
 - name: Record role in image manifest
-  ansible.builtin.shell: |
-    set -eu
-    printf '{"role":"git","git":"%s","known_hosts":"%s"}\n' \
-      "$(git --version | awk '{print $3}')" "{{ git_known_hosts_source }}" > /etc/ws-image/git.json
-  args:
-    executable: /bin/bash
-  changed_when: true
+  ansible.builtin.copy:
+    dest: /etc/ws-image/git.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'git', 'git': (git_version_out.stdout.split()[2] if git_version_out.rc == 0 else 'none'),
+          'known_hosts': git_known_hosts_source} | to_json }}

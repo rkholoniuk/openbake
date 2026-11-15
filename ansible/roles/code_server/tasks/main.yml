@@ -1,29 +1,38 @@
 ---
-- name: Create download cache
-  ansible.builtin.file:
-    path: "{{ ws_download_cache }}/code-server"
-    state: directory
-    mode: "0755"
+# Probe, then act: the BuildKit download cache may be empty and is not state.
+- name: Find installed code-server {{ code_server_version }}
+  ansible.builtin.stat:
+    path: "/opt/code-server-{{ code_server_version }}/bin/code-server"
+  register: code_server_installed
 
-- name: Download code-server
-  ansible.builtin.get_url:
-    url: "{{ code_server_url }}"
-    dest: "{{ ws_download_cache }}/code-server/code-server-{{ code_server_version }}-{{ ws_arch.deb }}.tar.gz"
-    checksum: "{{ code_server_checksum | default(omit, true) }}"
-    mode: "0644"
+- name: Install code-server {{ code_server_version }}
+  when: not code_server_installed.stat.exists
+  block:
+    - name: Create download cache
+      ansible.builtin.file:
+        path: "{{ ws_download_cache }}/code-server"
+        state: directory
+        mode: "0755"
 
-- name: Create install directory
-  ansible.builtin.file:
-    path: "/opt/code-server-{{ code_server_version }}"
-    state: directory
-    mode: "0755"
+    - name: Download code-server
+      ansible.builtin.get_url:
+        url: "{{ code_server_url }}"
+        dest: "{{ ws_download_cache }}/code-server/code-server-{{ code_server_version }}-{{ ws_arch.deb }}.tar.gz"
+        checksum: "{{ code_server_checksum | default(omit, true) }}"
+        mode: "0644"
 
-- name: Unpack code-server
-  ansible.builtin.unarchive:
-    src: "{{ ws_download_cache }}/code-server/code-server-{{ code_server_version }}-{{ ws_arch.deb }}.tar.gz"
-    dest: "/opt/code-server-{{ code_server_version }}"
-    remote_src: true
-    extra_opts: [--strip-components=1]
+    - name: Create install directory
+      ansible.builtin.file:
+        path: "/opt/code-server-{{ code_server_version }}"
+        state: directory
+        mode: "0755"
+
+    - name: Unpack code-server
+      ansible.builtin.unarchive:
+        src: "{{ ws_download_cache }}/code-server/code-server-{{ code_server_version }}-{{ ws_arch.deb }}.tar.gz"
+        dest: "/opt/code-server-{{ code_server_version }}"
+        remote_src: true
+        extra_opts: [--strip-components=1]
 
 - name: Link code-server onto PATH
   ansible.builtin.file:
@@ -54,7 +63,20 @@
       disable-update-check: true
       extensions-dir: {{ code_server_extensions_dir }}
 
-- name: Install extensions
+- name: List installed extensions
+  ansible.builtin.command: >-
+    code-server --extensions-dir {{ code_server_extensions_dir }} --list-extensions
+  become: true
+  become_user: "{{ ws_user }}"
+  environment:
+    HOME: "{{ ws_home }}"
+  register: code_server_ext_installed
+  changed_when: false
+  failed_when: false    # code-server not installed yet in a check-mode preview
+  check_mode: false
+  when: code_server_extensions | length > 0
+
+- name: Install missing extensions
   ansible.builtin.command: >-
     code-server --extensions-dir {{ code_server_extensions_dir }} --install-extension {{ item }}
   loop: "{{ code_server_extensions }}"
@@ -62,7 +84,10 @@
   become_user: "{{ ws_user }}"
   environment:
     HOME: "{{ ws_home }}"
-  changed_when: true
+  register: code_server_ext_install
+  # IDs may carry a version (publisher.name@1.2.3); compare without it, case-insensitively.
+  when: (item.split('@')[0] | lower) not in (code_server_ext_installed.stdout_lines | default([]) | map('lower') | list)
+  changed_when: code_server_ext_install.rc == 0    # runs only for missing extensions
 
 - name: Install ws-code-server launcher
   ansible.builtin.copy:
@@ -81,11 +106,9 @@
       exec code-server --config /etc/code-server/config.yaml "${WS_WORKSPACE:-$HOME/workspace}"
 
 - name: Record role in image manifest
-  ansible.builtin.shell: |
-    set -eu
-    printf '{"role":"code_server","code_server":"%s","port":%s,"auth":"%s","extensions":%s}\n' \
-      "{{ code_server_version }}" "{{ code_server_port }}" "{{ code_server_auth }}" \
-      '{{ code_server_extensions | to_json }}' > /etc/ws-image/code_server.json
-  args:
-    executable: /bin/bash
-  changed_when: true
+  ansible.builtin.copy:
+    dest: /etc/ws-image/code_server.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'code_server', 'code_server': code_server_version, 'port': code_server_port | int,
+          'auth': code_server_auth, 'extensions': code_server_extensions} | to_json }}

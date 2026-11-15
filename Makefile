@@ -40,9 +40,9 @@ TRIVY = docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
 	  -v ws-trivy-cache:/root/.cache/trivy -v "$(CURDIR)/security:/security:ro" \
 	  $(SCAN_IMAGE) image --ignorefile /security/trivyignore.yaml --exit-code 1 --no-progress
 # Check-mode policy shared by CI and `make ci`: blocking profiles fail the run;
-# report-only profiles (spike roles, fixed in M4) only warn.
-CHECK_BLOCKING    ?= minimal
-CHECK_REPORT_ONLY ?= devbox data agent
+# report-only profiles only warn (use for a profile whose roles are being reworked).
+CHECK_BLOCKING    ?= minimal devbox data agent
+CHECK_REPORT_ONLY ?=
 
 help:
 	@sed -n '1,/^$$/p' Makefile | sed 's/^# \{0,1\}//'
@@ -76,7 +76,7 @@ CI_SELECTED = $(or $(PROFILE),$(CI_PROFILES))
 check-ci:
 	$(if $(filter $(CHECK_BLOCKING),$(CI_SELECTED)),$(MAKE) check PROFILE="$(filter $(CHECK_BLOCKING),$(CI_SELECTED))")
 	@for p in $(filter $(CHECK_REPORT_ONLY),$(CI_SELECTED)); do \
-	  $(MAKE) check PROFILE=$$p || echo "::warning::check mode not clean for $$p (report-only until M4)"; \
+	  $(MAKE) check PROFILE=$$p || echo "::warning::check mode not clean for $$p (report-only)"; \
 	done
 
 # Same steps as .github/workflows/ci.yml; CI only adds runners, caching and the arch matrix.

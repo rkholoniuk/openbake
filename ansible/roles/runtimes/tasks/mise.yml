@@ -1,25 +1,42 @@
 ---
-- name: Create mise directories
+# Probe, then act: every step checks the installed state first, so a second run
+# (or a --check run on a finished image) reports no changes. The BuildKit
+# download cache is only a cache: it may be empty and is never treated as state.
+
+- name: Read installed mise version
+  ansible.builtin.command: /usr/local/bin/mise --version
+  register: runtimes_mise_installed
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install mise {{ mise_version }}
+  when: runtimes_mise_installed.rc != 0 or not runtimes_mise_installed.stdout.startswith(mise_version ~ ' ')
+  block:
+    - name: Create mise download cache
+      ansible.builtin.file:
+        path: "{{ ws_download_cache }}/mise"
+        state: directory
+        mode: "0755"
+
+    - name: Download mise
+      ansible.builtin.get_url:
+        url: "{{ mise_url }}"
+        dest: "{{ ws_download_cache }}/mise/mise-{{ mise_version }}-{{ ws_arch.node }}"
+        checksum: "{{ mise_checksum | default(omit, true) }}"
+        mode: "0755"
+
+    - name: Install mise binary
+      ansible.builtin.copy:
+        src: "{{ ws_download_cache }}/mise/mise-{{ mise_version }}-{{ ws_arch.node }}"
+        dest: /usr/local/bin/mise
+        remote_src: true
+        mode: "0755"
+
+- name: Create mise config directory
   ansible.builtin.file:
-    path: "{{ item }}"
+    path: /etc/mise
     state: directory
-    mode: "0755"
-  loop:
-    - "{{ ws_download_cache }}/mise"
-    - /etc/mise
-
-- name: Download mise
-  ansible.builtin.get_url:
-    url: "{{ mise_url }}"
-    dest: "{{ ws_download_cache }}/mise/mise-{{ mise_version }}-{{ ws_arch.node }}"
-    checksum: "{{ mise_checksum | default(omit, true) }}"
-    mode: "0755"
-
-- name: Install mise binary
-  ansible.builtin.copy:
-    src: "{{ ws_download_cache }}/mise/mise-{{ mise_version }}-{{ ws_arch.node }}"
-    dest: /usr/local/bin/mise
-    remote_src: true
     mode: "0755"
 
 - name: System-wide mise config (applies to every user)
@@ -34,22 +51,55 @@
       [settings]
       python.compile = false
 
+# Offline: resolves requested versions against what is installed only. A
+# requested version that is not installed is missing from the output or has
+# installed=false; both count as missing below.
+# Probes that run mise run as the workspace user: anything mise writes into
+# its data dir is then user-owned and doesn't undo the chown in main.yml.
+- name: List installed Python and Node versions
+  ansible.builtin.command: mise ls --current --json
+  become: true
+  become_user: "{{ ws_user }}"
+  environment:
+    MISE_DATA_DIR: "{{ mise_data_dir }}"
+    MISE_OFFLINE: "1"
+  register: runtimes_mise_ls
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Work out missing versions
+  ansible.builtin.set_fact:
+    runtimes_mise_missing: >-
+      {%- set have = (runtimes_mise_ls.stdout | from_json) if runtimes_mise_ls.rc == 0 and runtimes_mise_ls.stdout else {} -%}
+      {%- set missing = [] -%}
+      {%- for tool, wanted in {'python': python_versions, 'node': node_versions}.items() -%}
+      {%-   for v in wanted -%}
+      {%-     if have.get(tool, []) | selectattr('requested_version', 'equalto', v) | selectattr('installed') | list | length == 0 -%}
+      {%-       set _ = missing.append(tool ~ '@' ~ v) -%}
+      {%-     endif -%}
+      {%-   endfor -%}
+      {%- endfor -%}
+      {{ missing }}
+
 # MISE_CACHE_DIR sits on the BuildKit cache mount, so warm rebuilds reuse
 # the downloaded Python/Node archives.
-- name: Install Python and Node versions
+- name: Install missing Python and Node versions
   ansible.builtin.command: mise install --yes
   environment: "{{ {'MISE_DATA_DIR': mise_data_dir, 'MISE_CACHE_DIR': ws_download_cache ~ '/mise/cache', 'MISE_YES': '1'} | combine(runtimes_mise_env) }}"
-  changed_when: true
+  register: runtimes_mise_install
+  when: runtimes_mise_missing | length > 0
+  changed_when: runtimes_mise_install.rc == 0    # runs only when versions were missing
+
+- name: Find mise shims
+  ansible.builtin.stat:
+    path: "{{ mise_data_dir }}/shims/python3"
+  register: runtimes_mise_shim
 
 - name: Create shims
   ansible.builtin.command: mise reshim
   environment:
     MISE_DATA_DIR: "{{ mise_data_dir }}"
-  changed_when: true
-
-- name: Let the workspace user add versions later
-  ansible.builtin.file:
-    path: "{{ mise_data_dir }}"
-    owner: "{{ ws_user }}"
-    group: "{{ ws_user }}"
-    recurse: true
+  register: runtimes_mise_reshim
+  when: runtimes_mise_install is changed or not runtimes_mise_shim.stat.exists
+  changed_when: runtimes_mise_reshim.rc == 0    # runs only after an install or when shims are missing

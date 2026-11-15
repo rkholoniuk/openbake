@@ -9,15 +9,18 @@
 
 # The package creates a root-managed cluster for systemd. A workspace has no
 # systemd and runs as the user, so drop it and use ws-postgres instead.
+- name: List packaged clusters
+  ansible.builtin.command: pg_lsclusters -h
+  register: postgres_clusters
+  changed_when: false
+  failed_when: false    # not installed yet in a check-mode preview
+  check_mode: false
+
 - name: Remove the packaged cluster
-  ansible.builtin.shell: |
-    set -eu
-    for c in $(pg_lsclusters -h | awk '{print $1"/"$2}'); do
-      pg_dropcluster --stop "${c%/*}" "${c#*/}"
-    done
-  args:
-    executable: /bin/bash
-  changed_when: true
+  ansible.builtin.command: pg_dropcluster --stop {{ item.split()[0] }} {{ item.split()[1] }}
+  loop: "{{ postgres_clusters.stdout_lines | default([]) }}"
+  register: postgres_drop
+  changed_when: postgres_drop.rc == 0
 
 # The ssl-cert package (a PostgreSQL dependency) generates a "snakeoil" key pair
 # at install time. Baked into an image, every container would share that
@@ -37,11 +40,21 @@
     dest: /usr/local/bin/ws-postgres
     mode: "0755"
 
-- name: Record role in image manifest
+- name: Read installed PostgreSQL version
   ansible.builtin.shell: |
     set -eu
     bin=$(ls -d /usr/lib/postgresql/*/bin | sort -V | tail -1)
-    printf '{"role":"postgres","postgres":"%s"}\n' "$("$bin/postgres" --version | awk '{print $3}')" > /etc/ws-image/postgres.json
+    "$bin/postgres" --version | awk '{print $3}'
   args:
     executable: /bin/bash
-  changed_when: true
+  register: postgres_version_out
+  changed_when: false
+  failed_when: false    # not installed yet in a check-mode preview
+  check_mode: false
+
+- name: Record role in image manifest
+  ansible.builtin.copy:
+    dest: /etc/ws-image/postgres.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'postgres', 'postgres': postgres_version_out.stdout | default('none', true)} | to_json }}

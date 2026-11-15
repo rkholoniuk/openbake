@@ -21,6 +21,7 @@
   register: agents_node
   changed_when: false
   failed_when: false
+  check_mode: false    # read-only; the assert below needs the result
 
 - name: Require a recent enough Node (add the runtimes role first)
   ansible.builtin.assert:
@@ -30,14 +31,44 @@
     fail_msg: "Need Node >= {{ agents_node_min_major }}, found: {{ agents_node.stdout | default('none', true) }}"
     quiet: true
 
-- name: Install agent CLIs into {{ agents_prefix }}
-  ansible.builtin.command: >-
-    npm install --global --no-fund --no-audit --prefix {{ agents_prefix }}
-    {{ agents | map('extract', agents_npm_packages) | join(' ') }}
+- name: List installed agent CLIs
+  ansible.builtin.command: npm ls --global --prefix {{ agents_prefix }} --depth=0 --json
   environment:
     PATH: "/opt/mise/shims:{{ ansible_env.PATH }}"
     MISE_DATA_DIR: /opt/mise
-  changed_when: true
+  register: agents_npm_ls
+  changed_when: false
+  failed_when: false    # empty prefix on first run
+  check_mode: false
+
+# agents_npm_packages values are "<package>@<version>"; the package name may
+# itself start with "@" (scoped), so split on the last "@".
+- name: Work out missing agent CLIs
+  vars:
+    agents_have: "{{ ((agents_npm_ls.stdout | from_json).dependencies | default({})) if agents_npm_ls.stdout else {} }}"
+  ansible.builtin.set_fact:
+    agents_missing: >-
+      {%- set missing = [] -%}
+      {%- for a in agents -%}
+      {%-   set spec = agents_npm_packages[a] -%}
+      {%-   set name = spec.rsplit('@', 1)[0] -%}
+      {%-   set version = spec.rsplit('@', 1)[1] -%}
+      {%-   if agents_have.get(name, {}).get('version') != version -%}
+      {%-     set _ = missing.append(spec) -%}
+      {%-   endif -%}
+      {%- endfor -%}
+      {{ missing }}
+
+- name: Install agent CLIs into {{ agents_prefix }}
+  ansible.builtin.command: >-
+    npm install --global --no-fund --no-audit --prefix {{ agents_prefix }}
+    {{ agents_missing | join(' ') }}
+  environment:
+    PATH: "/opt/mise/shims:{{ ansible_env.PATH }}"
+    MISE_DATA_DIR: /opt/mise
+  register: agents_npm_install
+  when: agents_missing | length > 0
+  changed_when: agents_npm_install.rc == 0    # runs only for missing or outdated CLIs
 
 - name: Link agent CLIs onto PATH
   ansible.builtin.file:
@@ -59,14 +90,10 @@
       export DISABLE_AUTOUPDATER=1
 
 - name: Record role in image manifest
-  ansible.builtin.shell: |
-    set -eu
-    export PATH="/opt/mise/shims:$PATH"
-    codex=$(command -v codex >/dev/null && codex --version 2>/dev/null | awk '{print $NF}' || echo none)
-    claude=$(command -v claude >/dev/null && claude --version 2>/dev/null | awk '{print $1}' || echo none)
-    printf '{"role":"agents","node":"%s","codex":"%s","claude_code":"%s"}\n' \
-      "$(node --version)" "$codex" "$claude" > /etc/ws-image/agents.json
-    cat /etc/ws-image/agents.json
-  args:
-    executable: /bin/bash
-  changed_when: true
+  ansible.builtin.copy:
+    dest: /etc/ws-image/agents.json
+    mode: "0644"
+    content: >
+      {{ {'role': 'agents', 'node': agents_node.stdout | default('none', true),
+          'codex': codex_version if 'codex' in agents else 'none',
+          'claude_code': claude_code_version if 'claude_code' in agents else 'none'} | to_json }}
