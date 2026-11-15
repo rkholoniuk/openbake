@@ -11,8 +11,10 @@ Run: ${run_url}
 
 Typical causes: a new CRITICAL vulnerability with a fix (update the pin or base image), a secret found in a layer, or a role that no longer applies cleanly."
 
-existing="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" \
-  --json number,title --jq ".[] | select(.title == \"$title\") | .number" | head -1)"
+# The title is passed through the environment, not spliced into the jq program.
+existing="$(WEEKLY_TITLE="$title" gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+  --search "\"$title\" in:title" --json number,title \
+  --jq '.[] | select(.title == env.WEEKLY_TITLE) | .number' | head -1)"
 
 if [ -n "$existing" ]; then
   gh issue comment "$existing" --repo "$GITHUB_REPOSITORY" --body "Failed again: ${run_url}"

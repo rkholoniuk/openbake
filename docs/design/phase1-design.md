@@ -650,6 +650,7 @@ fallback for.
 | 2026-11-14 | D3: `make up` prefers a `ws-<p>:local` image when one exists | owner |
 | 2026-11-14 | Inventories per environment under `ansible/inventories/` (`local`, `test`, `example` committed; real ones git-ignored) | owner |
 | 2026-11-14 | Dedicated automation account for host runs (`automation_account` role, opt-in bootstrap); `become` per task or block, not per play | owner |
+| 2026-11-15 | The `os` stage runs `apt-get upgrade`, so a from-scratch build (`make refresh`, weekly) also patches packages inherited from `ubuntu:24.04`; Neovim checksums are keyed by version and unknown versions fail (review of PRs #4/#5) | design, from EGM + Codex review |
 | 2026-11-15 | Weekly patching before v0.2: `make refresh` (`--pull --no-cache`, then smoke, check, scan) and a weekly CI run that opens one issue on failure; publishing, signing and nightly rescans stay in v0.2 | owner |
 | 2026-11-15 | Roles use probe-then-act: the BuildKit download cache is never state; manifests are written with `copy` content; no `changed_when: true`. `make check` blocks for all images (first part of M4) | design, from CI check-mode results |
 | 2026-11-14 | `make ping`: ping + connectivity report (DNS, HTTPS to download sources, IPv4/IPv6) before host runs | owner |
