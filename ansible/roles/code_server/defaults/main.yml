@@ -2,7 +2,12 @@
 code_server_version: "4.145.2"
 code_server_release_base: "https://github.com/coder/code-server/releases/download"
 code_server_url: "{{ code_server_release_base }}/v{{ code_server_version }}/code-server-{{ code_server_version }}-linux-{{ ws_arch.deb }}.tar.gz"
-code_server_checksum: ""
+# sha256 per version and architecture (4.145.2: GitHub's asset digests,
+# confirmed by downloading). A version without an entry fails.
+code_server_checksums:
+  "4.145.2":
+    amd64: sha256:2f6db6c3e8b733dd6b3aeee83532e148b2bae2e392353ba85452d03572348962
+    arm64: sha256:e867a34416e2da4a83496b09580001893e7a4e5bb58a0624c4fcd22819e7d53d
 
 code_server_port: 13337
 # none: put an authenticating proxy in front (the Platform router does this).

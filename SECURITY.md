@@ -23,9 +23,10 @@ agent CLIs) should go to those projects. We fix them here by updating pins and r
 - Every PR: Trivy fails on CRITICAL vulnerabilities that have a fix, and on secrets in any image
   layer; OSV-Scanner fails on any known malicious package in the images and lockfiles
   (`make scan`).
-- Every Monday: all images are rebuilt from scratch with the newest Ubuntu base and current
-  security updates, then smoke-tested, checked and scanned (`make refresh`,
-  `.github/workflows/weekly.yml`). A failure opens an issue.
+- Every Monday: all images are rebuilt from scratch on the pinned Ubuntu base with today's
+  security updates (`apt-get upgrade`), then smoke-tested, checked and scanned (`make refresh`,
+  `.github/workflows/weekly.yml`). A failure opens an issue. The base image digest itself is
+  bumped by a reviewed commit (Renovate from M3).
 - Locally: `make refresh PROFILE=<image>` does the same for your images.
 
 Planned: published images rebuilt weekly with signatures and SBOMs, a nightly rescan of published

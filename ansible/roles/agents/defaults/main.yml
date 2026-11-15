@@ -1,8 +1,10 @@
 ---
 # Which coding-agent CLIs to put on PATH. Versions (and every transitive
 # dependency) come from files/package.json + files/package-lock.json:
-# update them with `npm install --package-lock-only --ignore-scripts` in
-# that directory, in a reviewed commit (Renovate from M3).
+# update them with `npx -y npm@11 install --package-lock-only --ignore-scripts`
+# in that directory (npm 11 records libc, so glibc systems skip the musl
+# builds), in a reviewed commit (Renovate from M3). scripts/check-npm-lock.py
+# (make lint) checks the lockfile.
 agents: [codex, claude_code]
 
 agents_prefix: /opt/agents
@@ -16,7 +18,11 @@ agents_npm:
   claude_code: { package: "@anthropic-ai/claude-code", bin: claude }
 
 # npm ci runs with --ignore-scripts. Install scripts that are reviewed and
-# needed run explicitly afterwards (claude-code's install.cjs only copies its
-# native binary out of the platform package that the lockfile installed).
+# needed run explicitly afterwards, only if their content matches the sha256
+# recorded here (a lockfile bump that changes the script fails until it is
+# reviewed again). claude-code's install.cjs only copies its native binary out
+# of the platform package that the lockfile installed; no network.
 agents_allowed_install_scripts:
-  - "@anthropic-ai/claude-code/install.cjs"
+  - path: "@anthropic-ai/claude-code/install.cjs"
+    package: "@anthropic-ai/claude-code"
+    sha256: 49e8406d5d752708458b0a5c39991784102bf9aeb6488782f2b0dffe07f944eb    # 2.1.322

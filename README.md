@@ -47,11 +47,11 @@ WS_PYTHON_VERSIONS='["3.13","3.12"]' WS_NODE_VERSIONS='["24"]' make image PROFIL
 A normal `make image` reuses cached layers, so it does **not** pick up new security updates.
 
 ```sh
-make refresh PROFILE=devbox   # newest ubuntu:24.04, no cache, then smoke, check mode and Trivy
+make refresh PROFILE=devbox   # no cache: pinned base + today's security updates, then smoke, check, scans
 ```
 
 CI runs `make refresh` for every image each Monday and opens an issue if a fresh build, check
-mode or the Trivy gate fails. Don't `apt upgrade` inside a running workspace: only `/home/user`
+mode or the Trivy/OSV gates fail. Don't `apt upgrade` inside a running workspace: only `/home/user`
 survives a rebuild, so refresh the image instead.
 
 ## How it works

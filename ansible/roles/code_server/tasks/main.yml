@@ -5,6 +5,12 @@
     path: "/opt/code-server-{{ code_server_version }}/bin/code-server"
   register: code_server_installed
 
+- name: Check a pinned checksum exists for code-server {{ code_server_version }}
+  ansible.builtin.assert:
+    that: code_server_version in code_server_checksums and ws_arch.deb in code_server_checksums[code_server_version]
+    fail_msg: "no sha256 for code-server {{ code_server_version }} ({{ ws_arch.deb }}) in code_server_checksums"
+    quiet: true
+
 - name: Install code-server {{ code_server_version }}
   when: not code_server_installed.stat.exists
   block:
@@ -18,7 +24,7 @@
       ansible.builtin.get_url:
         url: "{{ code_server_url }}"
         dest: "{{ ws_download_cache }}/code-server/code-server-{{ code_server_version }}-{{ ws_arch.deb }}.tar.gz"
-        checksum: "{{ code_server_checksum | default(omit, true) }}"
+        checksum: "{{ code_server_checksums[code_server_version][ws_arch.deb] }}"
         mode: "0644"
 
     - name: Create install directory

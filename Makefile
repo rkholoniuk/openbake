@@ -8,7 +8,7 @@
 #   make check [PROFILE=devbox]      re-apply an image's roles with --check: must report changed=0
 #   make scan [PROFILE=devbox]       Trivy (CRITICAL with a fix, secrets) + OSV (malicious packages) gate
 #   make ci [PROFILE=devbox]         everything CI runs, in the same order (lint image smoke check scan)
-#   make refresh [PROFILE=devbox]    rebuild from scratch (new base image + current security updates),
+#   make refresh [PROFILE=devbox]    rebuild from scratch (pinned base + today's security updates),
 #                                    then smoke, check and scan. A plain `make image` reuses cached layers.
 #   make custom FROM=agent ROLES=hello_custom [VARS='{"hello_custom_packages":["htop"]}']
 #   make run-devbox                  code-server on http://127.0.0.1:13337 (PASSWORD=...)
@@ -17,6 +17,11 @@
 # Images are ws-<profile>:$(WS_TAG). Build settings are WS_* variables, see
 # images/docker-bake.hcl, e.g.
 #   WS_PYTHON_VERSIONS='["3.13","3.12"]' make image PROFILE=devbox
+
+# bash with pipefail, so a failing command on the left of a pipe fails the
+# recipe (docker save | docker run in scan). bash ships with macOS and Linux.
+SHELL := bash
+.SHELLFLAGS := -o pipefail -c
 
 WS_REGISTRY ?=
 WS_TAG      ?= local
@@ -70,6 +75,10 @@ lint:
 	    echo "== ansible-lint"; ansible-lint; \
 	    echo "== actionlint"; actionlint; \
 	    echo "== zizmor (GitHub workflow security)"; zizmor --offline --min-severity medium .github/workflows; \
+	    echo "== npm lockfile"; python3 scripts/check-npm-lock.py; \
+	    echo "== no stray osv-scanner.toml"; \
+	    if find . -name osv-scanner.toml ! -path ./security/osv-scanner.toml -not -path "./.git/*" | grep .; then \
+	      echo "osv-scanner.toml outside security/ could hide findings" >&2; exit 1; fi; \
 	    echo "== actions pinned to commit SHAs"; \
 	    if grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; then \
 	      echo "unpinned action(s) above: pin to a full commit SHA" >&2; exit 1; fi; \
@@ -110,25 +119,25 @@ scan:
 	$(BAKE) scan
 	@echo "== osv: malicious packages in lockfiles"
 	@docker run --rm --entrypoint sh -v "$(CURDIR):/src:ro" $(SCAN_IMAGE) -c '\
-	  osv-scanner scan source $(OSV_LOCKFILES) --format json --output-file /tmp/osv.json > /tmp/osv.log 2>&1; rc=$$?; \
-	  tail -3 /tmp/osv.log; python3 /src/security/osv-gate.py /tmp/osv.json $$rc lockfiles'
+	  osv-scanner scan source --config /src/security/osv-scanner.toml $(OSV_LOCKFILES) \
+	    --format json --output-file /tmp/osv.json > /tmp/osv.log 2>&1; rc=$$?; \
+	  python3 /src/security/osv-gate.py /tmp/osv.json $$rc lockfiles || { tail -20 /tmp/osv.log; exit 1; }'
 	@for p in $(or $(PROFILE),$(SCAN_PROFILES)); do \
 	  img="$(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$$p:$(WS_TAG)"; \
 	  echo "== trivy: $$img"; \
 	  $(TRIVY) --scanners vuln --severity CRITICAL --ignore-unfixed "$$img" || exit 1; \
 	  $(TRIVY) --scanners secret "$$img" || exit 1; \
 	  echo "== osv: malicious packages in $$img"; \
-	  tmp="$$(mktemp -d)"; \
-	  docker save "$$img" -o "$$tmp/image.tar" || exit 1; \
-	  docker run --rm --entrypoint sh -v "$$tmp:/work" -v "$(CURDIR)/security:/security:ro" $(SCAN_IMAGE) -c '\
-	    osv-scanner scan image --archive /work/image.tar --format json --output-file /work/osv.json > /work/osv.log 2>&1; rc=$$?; \
-	    tail -3 /work/osv.log; python3 /security/osv-gate.py /work/osv.json $$rc image'; rc=$$?; \
-	  rm -f "$$tmp/image.tar" "$$tmp/osv.json" "$$tmp/osv.log"; rmdir "$$tmp"; \
-	  [ $$rc -eq 0 ] || exit $$rc; \
+	  docker save "$$img" | docker run -i --rm --entrypoint sh -v "$(CURDIR)/security:/security:ro" $(SCAN_IMAGE) -c '\
+	    cat > /tmp/image.tar && \
+	    osv-scanner scan image --archive /tmp/image.tar --config /security/osv-scanner.toml \
+	      --format json --output-file /tmp/osv.json > /tmp/osv.log 2>&1; rc=$$?; \
+	    python3 /security/osv-gate.py /tmp/osv.json $$rc image || { tail -20 /tmp/osv.log; exit 1; }' || exit 1; \
 	done
 
-# Patching: --pull fetches the newest ubuntu:24.04, --no-cache re-runs every
-# role so apt installs today's security updates. The weekly workflow runs this.
+# Patching: --no-cache re-runs the os stage (apt-get upgrade) and every role, so
+# the pinned ubuntu:24.04 digest gets today's security updates. The digest itself
+# moves only through a reviewed commit (Renovate from M3). Weekly workflow runs this.
 REFRESH_PROFILES ?= minimal devbox data agent
 refresh:
 	$(MAKE) image PROFILE="$(or $(PROFILE),$(REFRESH_PROFILES))" BAKE_ARGS="$(BAKE_ARGS) --pull --no-cache"

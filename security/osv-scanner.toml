@@ -1,0 +1,8 @@
+# OSV-Scanner configuration used by every `make scan` run (passed with --config).
+# Passing it explicitly stops osv-scanner from picking up an osv-scanner.toml
+# placed next to a lockfile, which could hide findings before the gate sees
+# them. `make lint` rejects osv-scanner.toml files anywhere else.
+#
+# Malicious packages (MAL- advisories) are never ignored: do not add
+# [[IgnoredVulns]] or [[PackageOverrides]] entries for them. Other
+# vulnerabilities are gated by Trivy (security/trivyignore.yaml).

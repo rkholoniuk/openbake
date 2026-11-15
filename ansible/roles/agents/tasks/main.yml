@@ -44,11 +44,23 @@
     mode: "0644"
   loop: [package.json, package-lock.json]
 
-# Probe, then act: node_modules matches the lockfile when the marker written
-# after the last successful install holds the lockfile's sha256.
-- name: Read the installed lockfile marker
+- name: Hash package.json and package-lock.json
+  ansible.builtin.stat:
+    path: "{{ agents_prefix }}/{{ item }}"
+    checksum_algorithm: sha256
+  loop: [package.json, package-lock.json]
+  register: agents_files
+
+# Probe, then act: node_modules matches when the marker written after the last
+# successful install holds the sha256 of both files (as on disk).
+- name: Work out the wanted install marker
+  ansible.builtin.set_fact:
+    agents_wanted_marker: >-
+      {{ agents_files.results | map(attribute='stat.checksum') | map('default', 'missing') | join(' ') }}
+
+- name: Read the installed marker
   ansible.builtin.slurp:
-    src: "{{ agents_prefix }}/node_modules/.ws-lock-sha256"
+    src: "{{ agents_prefix }}/node_modules/.ws-install-sha256"
   register: agents_marker
   failed_when: false
   check_mode: false
@@ -60,27 +72,51 @@
     MISE_DATA_DIR: /opt/mise
     npm_config_ignore_scripts: "true"
   register: agents_npm_ci
-  when: (agents_marker.content | default('') | b64decode | trim) != (lookup('file', 'package-lock.json') | hash('sha256'))
-  changed_when: agents_npm_ci.rc == 0    # runs only when node_modules doesn't match the lockfile
+  when: (agents_marker.content | default('') | b64decode | trim) != agents_wanted_marker
+  changed_when: agents_npm_ci.rc == 0    # runs only when node_modules doesn't match the files
+
+- name: Hash the allowed install scripts
+  ansible.builtin.stat:
+    path: "{{ agents_prefix }}/node_modules/{{ item.path }}"
+    checksum_algorithm: sha256
+  loop: "{{ agents_allowed_install_scripts }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: agents_script_files
+  when: agents_npm_ci is changed
+
+- name: Refuse install scripts whose content was not reviewed
+  ansible.builtin.assert:
+    that: item.stat.exists and item.stat.checksum == item.item.sha256
+    fail_msg: >-
+      {{ item.item.path }} has sha256 {{ item.stat.checksum | default('missing') }}, reviewed is
+      {{ item.item.sha256 }}: review the new script, then update agents_allowed_install_scripts
+    quiet: true
+  loop: "{{ agents_script_files.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: agents_npm_ci is changed
 
 - name: Run reviewed install scripts
-  ansible.builtin.command: node {{ item | basename }}
+  ansible.builtin.command: node {{ item.path | basename }}
   args:
-    chdir: "{{ agents_prefix }}/node_modules/{{ item | dirname }}"
+    chdir: "{{ agents_prefix }}/node_modules/{{ item.path | dirname }}"
   environment:
     PATH: "/opt/mise/shims:{{ ansible_env.PATH }}"
     MISE_DATA_DIR: /opt/mise
   loop: "{{ agents_allowed_install_scripts }}"
+  loop_control:
+    label: "{{ item.path }}"
   register: agents_scripts
   when: agents_npm_ci is changed
   changed_when: agents_scripts.rc == 0    # runs only after npm ci
 
-- name: Record the installed lockfile
+- name: Record the installed files
   ansible.builtin.copy:
-    dest: "{{ agents_prefix }}/node_modules/.ws-lock-sha256"
-    content: "{{ lookup('file', 'package-lock.json') | hash('sha256') }}\n"
+    dest: "{{ agents_prefix }}/node_modules/.ws-install-sha256"
+    content: "{{ agents_wanted_marker }}\n"
     mode: "0644"
-  when: not ansible_check_mode or agents_npm_ci is not skipped
+  # Runs in check mode too, so a pending install or marker repair shows as changed.
 
 - name: Link agent CLIs onto PATH
   ansible.builtin.file:
@@ -107,7 +143,9 @@
     mode: "0644"
     content: >
       {{ {'role': 'agents', 'node': agents_node.stdout | default('none', true),
-          'lockfile_sha256': lookup('file', 'package-lock.json') | hash('sha256'),
-          'codex': agents_lock.packages['node_modules/@openai/codex'].version if 'codex' in agents else 'none',
-          'claude_code': agents_lock.packages['node_modules/@anthropic-ai/claude-code'].version
-                         if 'claude_code' in agents else 'none'} | to_json }}
+          'lockfile_sha256': agents_files.results[1].stat.checksum | default('none'),
+          'linked': agents,
+          'versions': dict(agents_npm | dict2items | map(attribute='key')
+                           | zip(agents_npm | dict2items | map(attribute='value.package')
+                                 | map('regex_replace', '^', 'node_modules/')
+                                 | map('extract', agents_lock.packages) | map(attribute='version')))} | to_json }}

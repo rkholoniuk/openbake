@@ -1,8 +1,9 @@
 ---
 name: weekly
 
-# Patching: rebuild every image from scratch once a week (newest ubuntu:24.04,
-# current security updates), then smoke, check mode and the Trivy gate. A
+# Patching: rebuild every image from scratch once a week (pinned ubuntu:24.04
+# digest plus today's security updates via apt-get upgrade), then smoke, check
+# mode and the Trivy/OSV gates. A
 # failure opens one issue (later failures comment on it). Same steps as
 # `make refresh` locally.
 
