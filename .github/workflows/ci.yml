@@ -30,6 +30,9 @@ jobs:
       # yamllint, --syntax-check, ansible-lint, actionlint and shellcheck, inside the lint image.
       - name: make lint
         run: make lint
+      # Roles refuse unsupported targets and bad arguments (reuses the lint image).
+      - name: make refusals
+        run: make refusals
 
   images:
     needs: lint

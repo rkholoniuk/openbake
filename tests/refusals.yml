@@ -1,0 +1,14 @@
+---
+# Applies one role the way apply.yml does (include_role, so the role's argument
+# spec is validated), without apply.yml's package-list refresh.
+#   ansible-playbook tests/refusals.yml -e ws_role=<role> -e ws_target=<image|host> --check
+- name: Apply one role for a refusal test
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    ws_user: user
+  tasks:
+    - name: Apply role
+      ansible.builtin.include_role:
+        name: "{{ ws_role }}"

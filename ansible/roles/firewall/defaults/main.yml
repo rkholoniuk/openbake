@@ -1,0 +1,21 @@
+---
+firewall_role_targets: [host]
+
+# Inbound rules; everything else inbound is denied, outbound is allowed.
+#   port   integer
+#   proto  tcp | udp            (default tcp)
+#   from   any | address | CIDR (default any)
+#   limit  rate-limit new connections, for SSH (default false)
+firewall_allow:
+  - { port: "{{ ansible_port | default(22) }}", proto: tcp, from: any, limit: true }
+
+# Refuse to run when the SSH port this run connects through is not in
+# firewall_allow (enabling ufw would cut the connection). Set false only for
+# hosts that are managed through another path, e.g. a console.
+firewall_require_ssh_rule: true
+
+# Docker publishes ports with its own iptables rules, which ufw does not see.
+# When Docker is installed, DOCKER-USER rules drop new connections to published
+# container ports unless the source is in this list or the published port is in
+# firewall_allow. Container and private-network traffic must stay allowed.
+firewall_docker_local_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]

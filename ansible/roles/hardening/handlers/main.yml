@@ -1,0 +1,6 @@
+---
+- name: Apply sysctl settings
+  ansible.builtin.command: sysctl -p /etc/sysctl.d/60-ws.conf
+  become: true
+  register: hardening_sysctl_apply
+  changed_when: hardening_sysctl_apply.rc == 0

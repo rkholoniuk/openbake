@@ -1,0 +1,8 @@
+---
+# Runs only after a change to the default policy or after.rules. A no-op for
+# rules (`ufw allow` applies them at once) and safe right after `ufw enable`.
+- name: Reload ufw
+  ansible.builtin.command: ufw reload
+  become: true
+  register: firewall_reload
+  changed_when: firewall_reload.rc == 0

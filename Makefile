@@ -5,6 +5,7 @@
 #   make image PROFILE=agent         build one image (or several: PROFILE="minimal agent")
 #   make smoke [PROFILE=devbox]      check images
 #   make lint                        yamllint, profiles consistency, ansible-lint, --syntax-check, actionlint, zizmor, shellcheck
+#   make refusals                    roles must refuse targets and arguments they don't support
 #   make check [PROFILE=devbox]      re-apply an image's roles with --check: must report changed=0
 #   make scan [PROFILE=devbox]       Trivy (CRITICAL with a fix, secrets) + OSV (malicious packages) gate
 #   make ci [PROFILE=devbox]         everything CI runs, in the same order (lint image smoke check scan)
@@ -33,7 +34,7 @@ export WS_REGISTRY WS_TAG
 ref = $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$(1):$(WS_TAG)
 
 .DEFAULT_GOAL := help
-.PHONY: help image smoke lint check check-ci scan ci refresh custom run-devbox run-data run-agent prune-cache
+.PHONY: help image smoke lint refusals check check-ci scan ci refresh custom run-devbox run-data run-agent prune-cache
 
 LINT_IMAGE    = $(call ref,lint)
 SCAN_IMAGE    = $(call ref,scan)
@@ -82,8 +83,15 @@ lint:
 	    echo "== actions pinned to commit SHAs"; \
 	    if grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; then \
 	      echo "unpinned action(s) above: pin to a full commit SHA" >&2; exit 1; fi; \
-	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh ansible/apply.sh .github/scripts/*.sh \
+	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh tests/refusals.sh ansible/apply.sh .github/scripts/*.sh \
 	      ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info'
+
+# Target refusals (design 6.7): host-only roles fail in an image, and bad role
+# arguments fail validation, before any task changes anything. Runs in the lint image.
+refusals:
+	$(BAKE) lint
+	docker run --rm -v "$(CURDIR):/src:ro" -e ANSIBLE_ROLES_PATH=/src/custom/roles:/src/ansible/roles \
+	  -e ANSIBLE_CONFIG=/src/ansible/ansible.cfg -e HOME=/tmp $(LINT_IMAGE) sh tests/refusals.sh
 
 # check with the CI policy (blocking vs report-only), limited to PROFILE when given.
 CI_SELECTED = $(or $(PROFILE),$(CI_PROFILES))
@@ -97,6 +105,7 @@ check-ci:
 CI_PROFILES ?= minimal devbox data agent
 ci:
 	$(MAKE) lint
+	$(MAKE) refusals
 	$(MAKE) image PROFILE="$(CI_SELECTED)"
 	$(MAKE) smoke PROFILE="$(CI_SELECTED)"
 	$(MAKE) check-ci PROFILE="$(CI_SELECTED)"

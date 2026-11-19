@@ -661,6 +661,8 @@ fallback for.
 | 2026-11-14 | Tool split (6.0): OpenTofu provisions, Ansible configures; inventories generated from OpenTofu outputs; remote Kubernetes via Ansible-installed RKE2 + Rancher | owner |
 | 2026-11-14 | Testing: lint (yamllint, ansible-lint, syntax check, actionlint, shellcheck), `--check` replay on built images, Trivy gate; CI is a thin wrapper over `make ci` | owner |
 | 2026-11-14 | D5: copy the spike without history (T1) | owner |
+| 2026-11-17 | Broker decision D6 (broker requirements doc, on `feat/sandbox`): M6 is built broker-ready. The Docker template gets an optional internal network and the env file is split into workspace variables and broker-held credentials; the broker stays off by default and broker phase B1 follows M6-M7 | owner |
+| 2026-11-17 | M5 `firewall` and `hardening` as built (ansible-core only, so ufw and sysctl are driven with probe-then-act commands and config files, not collection modules). `firewall`: refuses to run when `firewall_allow` has no rule for the SSH port of the run (`firewall_require_ssh_rule`); rules are added, never removed; DOCKER-USER matches published ports by original destination port and treats `firewall_docker_local_cidrs` (loopback and private ranges) as local; IPv4 only. `hardening`: root is exempt from the keyed-account preflight (root login is refused anyway); after writing `50-ws.conf` the role reads `sshd -T` and stops before the reload if another drop-in overrides a setting (sshd keeps the first value, and `50-cloud-init.conf` sorts before `50-ws.conf`); sysctl values live in `/etc/sysctl.d/60-ws.conf`. `make refusals` runs the target-refusal tests in the lint image | implementation |
 
 ## Detailed Implementation Plan
 

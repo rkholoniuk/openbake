@@ -24,4 +24,6 @@
     - postgres
     - data_sample
     - agents
+    - firewall
+    - hardening
     - hello_custom

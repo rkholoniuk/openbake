@@ -1,0 +1,21 @@
+---
+hardening_role_targets: [host]
+
+# Only members of these groups may log in over SSH (sshd AllowGroups). The role
+# creates the groups and adds ws_user.
+hardening_ssh_groups: [ws-ssh]
+
+# Accounts that have SSH keys but may lose SSH access (the preflight stops the
+# run for any other keyed account outside hardening_ssh_groups). root is always
+# refused by PermitRootLogin and needs no entry.
+hardening_ssh_lockout_ok: []
+
+# Written to /etc/sysctl.d/60-ws.conf. rp_filter=2 (loose) works with Tailscale.
+hardening_sysctl:
+  net.ipv4.conf.all.rp_filter: 2
+  net.ipv4.conf.all.accept_redirects: 0
+  net.ipv4.conf.all.send_redirects: 0
+  net.ipv6.conf.all.accept_redirects: 0
+  kernel.kptr_restrict: 2
+  fs.inotify.max_user_watches: 524288
+  fs.inotify.max_user_instances: 1024

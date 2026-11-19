@@ -1,0 +1,24 @@
+---
+argument_specs:
+  main:
+    short_description: Host firewall with ufw (deny inbound, allow outbound) and Docker port filtering
+    options:
+      firewall_role_targets:
+        type: list
+        elements: str
+        default: [host]
+      firewall_allow:
+        type: list
+        elements: dict
+        description: Inbound rules.
+        options:
+          port: { type: int, required: true }
+          proto: { type: str, choices: [tcp, udp], default: tcp }
+          from: { type: str, default: any }
+          limit: { type: bool, default: false }
+      firewall_require_ssh_rule:
+        type: bool
+        default: true
+      firewall_docker_local_cidrs:
+        type: list
+        elements: str

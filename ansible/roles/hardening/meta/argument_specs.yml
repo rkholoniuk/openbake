@@ -1,0 +1,20 @@
+---
+argument_specs:
+  main:
+    short_description: SSH hardening with a lockout preflight, and kernel settings
+    options:
+      hardening_role_targets:
+        type: list
+        elements: str
+        default: [host]
+      hardening_ssh_groups:
+        type: list
+        elements: str
+        required: true
+        description: Groups allowed to log in over SSH; must not be empty.
+      hardening_ssh_lockout_ok:
+        type: list
+        elements: str
+        description: Accounts with SSH keys that may lose SSH access.
+      hardening_sysctl:
+        type: dict

@@ -1,0 +1,163 @@
+---
+- name: Check the target is supported
+  ansible.builtin.assert:
+    that: ws_target in hardening_role_targets
+    fail_msg: "hardening does not support ws_target={{ ws_target }}"
+    quiet: true
+
+- name: Check there is an SSH group
+  ansible.builtin.assert:
+    that: hardening_ssh_groups | length > 0
+    fail_msg: "hardening_ssh_groups is empty: nobody could log in"
+    quiet: true
+
+# --- Preflight: nothing is changed until every check below has passed. ---
+
+- name: Read accounts
+  ansible.builtin.getent:
+    database: passwd
+  check_mode: false
+
+- name: Read groups
+  ansible.builtin.getent:
+    database: group
+  check_mode: false
+
+- name: Check ws_user exists
+  ansible.builtin.assert:
+    that: ws_user in ansible_facts.getent_passwd
+    fail_msg: "ws_user={{ ws_user }} does not exist on this host (roles never create users on hosts)"
+    quiet: true
+
+# Other users' homes are not readable without root.
+- name: Find authorized_keys files
+  ansible.builtin.stat:
+    path: "{{ item.value[4] }}/.ssh/authorized_keys"
+    get_checksum: false
+  become: true
+  loop: "{{ ansible_facts.getent_passwd | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: hardening_keys
+  check_mode: false
+
+- name: Work out who logs in with a key and who stays allowed
+  ansible.builtin.set_fact:
+    hardening_keyed: >-
+      {{ hardening_keys.results | selectattr('stat.exists') | selectattr('stat.size', 'gt', 0)
+         | map(attribute='item.key') | list }}
+    hardening_allowed: >-
+      {{ ([ws_user, 'root'] + hardening_ssh_lockout_ok
+          + (ansible_facts.getent_group | dict2items | selectattr('key', 'in', hardening_ssh_groups)
+             | map(attribute='value') | map(attribute=2) | map('split', ',') | flatten)) | unique }}
+
+- name: Check ws_user has an SSH key
+  ansible.builtin.assert:
+    that: ws_user in hardening_keyed
+    fail_msg: >-
+      {{ ws_user }} has no ~/.ssh/authorized_keys; password logins are about to be turned off.
+      Add a key and log in with it first
+    quiet: true
+
+- name: Check no other keyed account loses access
+  ansible.builtin.assert:
+    that: hardening_keyed | difference(hardening_allowed) | length == 0
+    fail_msg: >-
+      these accounts have SSH keys but are not in {{ hardening_ssh_groups | join(', ') }}:
+      {{ hardening_keyed | difference(hardening_allowed) | join(', ') }}.
+      Add them to a group, or list them in hardening_ssh_lockout_ok
+    quiet: true
+
+# --- Changes ---
+
+- name: Harden SSH and the kernel
+  become: true
+  block:
+    - name: Create the SSH groups
+      ansible.builtin.group:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ hardening_ssh_groups }}"
+      register: hardening_groups
+
+    # In a check-mode preview the groups above were not created yet.
+    - name: Add ws_user to the SSH groups
+      ansible.builtin.user:
+        name: "{{ ws_user }}"
+        groups: "{{ hardening_ssh_groups }}"
+        append: true
+      when: not (ansible_check_mode and hardening_groups is changed)
+
+    - name: Write the sshd drop-in
+      ansible.builtin.copy:
+        dest: /etc/ssh/sshd_config.d/50-ws.conf
+        owner: root
+        group: root
+        mode: "0644"
+        validate: /usr/sbin/sshd -t -f %s
+        content: |
+          # Managed by the openbake hardening role.
+          PasswordAuthentication no
+          KbdInteractiveAuthentication no
+          PermitRootLogin no
+          AllowGroups {{ hardening_ssh_groups | join(' ') }}
+          X11Forwarding no
+      register: hardening_dropin
+
+    # sshd keeps the first value it reads, so an earlier drop-in (for example
+    # 50-cloud-init.conf) can override ours. Check what sshd will really use
+    # before it is reloaded.
+    - name: Read the effective sshd settings
+      ansible.builtin.command: /usr/sbin/sshd -T
+      register: hardening_effective
+      changed_when: false
+      check_mode: false
+
+    - name: Check the settings are in effect
+      ansible.builtin.assert:
+        that: item in (hardening_effective.stdout_lines | map('lower') | list)
+        fail_msg: >-
+          sshd would not use "{{ item }}": another file in /etc/ssh/sshd_config.d or sshd_config
+          sets it first. sshd was not reloaded
+        quiet: true
+      # sshd -T prints one "allowgroups <name>" line per group.
+      loop: >-
+        {{ ['passwordauthentication no', 'kbdinteractiveauthentication no', 'permitrootlogin no', 'x11forwarding no']
+           + (hardening_ssh_groups | map('lower') | map('regex_replace', '^', 'allowgroups ') | list) }}
+      when: not ansible_check_mode
+
+    # Not a fact subset: needed to know whether an sshd is running. On Ubuntu
+    # 24.04 ssh is socket-activated; with no running daemon the next connection
+    # starts one with the new settings and there is nothing to reload.
+    - name: Read service states
+      ansible.builtin.service_facts:
+      check_mode: false
+
+    - name: Reload sshd
+      ansible.builtin.service:
+        name: ssh
+        state: reloaded
+      when:
+        - hardening_dropin is changed
+        - (ansible_facts.services['ssh.service'] | default({})).state | default('') == 'running'
+
+    - name: Write the kernel settings
+      ansible.builtin.copy:
+        dest: /etc/sysctl.d/60-ws.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          # Managed by the openbake hardening role.
+          {% for key, value in hardening_sysctl | dictsort %}
+          {{ key }} = {{ value }}
+          {% endfor %}
+      notify: Apply sysctl settings
+
+# Prove that a fresh login still works before the play goes on.
+- name: Drop the SSH connection
+  ansible.builtin.meta: reset_connection
+
+- name: Log in again
+  ansible.builtin.wait_for_connection:
+    timeout: 30
