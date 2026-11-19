@@ -56,3 +56,6 @@ ansible/inventories/*
 # Python bytecode
 __pycache__/
 *.pyc
+
+# Local holding area for files set aside for deletion; never committed.
+_to_delete/

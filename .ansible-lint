@@ -5,6 +5,7 @@ profile: moderate
 offline: true
 exclude_paths:
   - .git/
+  - _to_delete/
   - .github/
   - .state/
   - .tools/

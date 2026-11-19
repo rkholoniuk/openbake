@@ -16,6 +16,7 @@ rules:
     forbid-explicit-octal: true
 ignore: |
   .git/
+  _to_delete/
   .state/
   .tools/
   ansible/roles/data_sample/files/
