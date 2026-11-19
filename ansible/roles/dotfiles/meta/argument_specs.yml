@@ -1,0 +1,22 @@
+---
+argument_specs:
+  main:
+    short_description: Personal dotfiles from a git repository (Coder dotfiles convention)
+    options:
+      dotfiles_role_targets:
+        type: list
+        elements: str
+        default: [host]
+      dotfiles_repo:
+        type: str
+        default: ""
+        description: https:// or git@ URL; empty disables the role.
+      dotfiles_ref:
+        type: str
+        default: main
+      dotfiles_install_scripts:
+        type: list
+        elements: str
+      dotfiles_link_exclude:
+        type: list
+        elements: str

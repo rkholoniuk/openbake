@@ -26,4 +26,6 @@
     - agents
     - firewall
     - hardening
+    - auto_updates
+    - dotfiles
     - hello_custom

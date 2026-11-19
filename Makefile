@@ -6,6 +6,8 @@
 #   make smoke [PROFILE=devbox]      check images
 #   make lint                        yamllint, profiles consistency, ansible-lint, --syntax-check, actionlint, zizmor, shellcheck
 #   make refusals                    roles must refuse targets and arguments they don't support
+#   make ping [INVENTORY=ansible/inventories/local] [LIMIT=host] NATIVE=1
+#                                    reach every host and report its access to download sources (./bootstrap.sh first)
 #   make check [PROFILE=devbox]      re-apply an image's roles with --check: must report changed=0
 #   make scan [PROFILE=devbox]       Trivy (CRITICAL with a fix, secrets) + OSV (malicious packages) gate
 #   make ci [PROFILE=devbox]         everything CI runs, in the same order (lint image smoke check scan)
@@ -34,7 +36,7 @@ export WS_REGISTRY WS_TAG
 ref = $(if $(WS_REGISTRY),$(WS_REGISTRY)/)ws-$(1):$(WS_TAG)
 
 .DEFAULT_GOAL := help
-.PHONY: help image smoke lint refusals check check-ci scan ci refresh custom run-devbox run-data run-agent prune-cache
+.PHONY: help image smoke lint refusals native-tools ping check check-ci scan ci refresh custom run-devbox run-data run-agent prune-cache
 
 LINT_IMAGE    = $(call ref,lint)
 SCAN_IMAGE    = $(call ref,scan)
@@ -73,6 +75,7 @@ lint:
 	    echo "== ansible-playbook --syntax-check"; \
 	    ansible-playbook --syntax-check -i localhost, ansible/apply.yml -e ws_roles=base; \
 	    ansible-playbook --syntax-check -i localhost, tests/syntax-check.yml; \
+	    ansible-playbook --syntax-check -i localhost, ansible/ping.yml; \
 	    echo "== ansible-lint"; ansible-lint; \
 	    echo "== actionlint"; actionlint; \
 	    echo "== zizmor (GitHub workflow security)"; zizmor --offline --min-severity medium .github/workflows; \
@@ -83,7 +86,7 @@ lint:
 	    echo "== actions pinned to commit SHAs"; \
 	    if grep -rnE "uses: *[^ ]+@" .github/workflows | grep -vE "@[0-9a-f]{40}( |$$)"; then \
 	      echo "unpinned action(s) above: pin to a full commit SHA" >&2; exit 1; fi; \
-	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh tests/refusals.sh ansible/apply.sh .github/scripts/*.sh \
+	    echo "== shellcheck"; shellcheck images/smoke.sh tests/check-mode.sh tests/refusals.sh bootstrap.sh ansible/apply.sh .github/scripts/*.sh \
 	      ansible/roles/base/files/ws-init ansible/roles/base/files/ws-info'
 
 # Target refusals (design 6.7): host-only roles fail in an image, and bad role
@@ -92,6 +95,21 @@ refusals:
 	$(BAKE) lint
 	docker run --rm -v "$(CURDIR):/src:ro" -e ANSIBLE_ROLES_PATH=/src/custom/roles:/src/ansible/roles \
 	  -e ANSIBLE_CONFIG=/src/ansible/ansible.cfg -e HOME=/tmp $(LINT_IMAGE) sh tests/refusals.sh
+
+# Host targets need Ansible and SSH on this machine until the runner image
+# lands (M8): run ./bootstrap.sh once, then pass NATIVE=1.
+INVENTORY ?= ansible/inventories/local
+NATIVE_ANSIBLE = .tools/venv/bin/ansible-playbook
+native-tools:
+	@test -n "$(NATIVE)" || { echo "host targets need NATIVE=1 until the runner image lands (M8): run ./bootstrap.sh, then add NATIVE=1" >&2; exit 2; }
+	@test -x $(NATIVE_ANSIBLE) || { echo "no $(NATIVE_ANSIBLE): run ./bootstrap.sh first" >&2; exit 2; }
+	@test -d "$(INVENTORY)" || { echo "no inventory directory $(INVENTORY)" >&2; exit 2; }
+
+# Read-only: ping every host, then report DNS and port-443 access to the
+# download sources. Report: .state/reports/connectivity-<inventory>.json
+ping: native-tools
+	ANSIBLE_CONFIG=ansible/ansible.cfg $(NATIVE_ANSIBLE) -i "$(INVENTORY)" ansible/ping.yml \
+	  -e "ws_inventory_name=$(notdir $(patsubst %/,%,$(INVENTORY)))" $(if $(LIMIT),-e "ws_hosts=$(LIMIT)")
 
 # check with the CI policy (blocking vs report-only), limited to PROFILE when given.
 CI_SELECTED = $(or $(PROFILE),$(CI_PROFILES))

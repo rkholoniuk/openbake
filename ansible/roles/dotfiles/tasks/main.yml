@@ -1,0 +1,136 @@
+---
+- name: Check the target is supported
+  ansible.builtin.assert:
+    that: ws_target in dotfiles_role_targets
+    fail_msg: "dotfiles does not support ws_target={{ ws_target }}"
+    quiet: true
+
+# Only https and SSH: no local paths, no git remote helpers (ext::, fd::), and
+# nothing git could read as an option.
+- name: Check the repository URL and ref
+  ansible.builtin.assert:
+    that:
+      - dotfiles_repo is match('^(https://[A-Za-z0-9._~:/@%+-]+|git@[A-Za-z0-9._-]+:[A-Za-z0-9._~/+-]+)$')
+      - dotfiles_ref is match('^[A-Za-z0-9][A-Za-z0-9._/-]*$')
+    fail_msg: "dotfiles_repo must be an https:// or git@host:path URL, and dotfiles_ref a branch, tag or commit"
+    quiet: true
+  when: dotfiles_repo | length > 0
+
+- name: Apply dotfiles
+  when: dotfiles_repo | length > 0
+  vars:
+    dotfiles_home: "{{ ansible_facts.user_dir }}"
+    dotfiles_dest: "{{ ansible_facts.user_dir }}/.config/ws/dotfiles"
+    dotfiles_marker: "{{ ansible_facts.user_dir }}/.config/ws/dotfiles.applied"
+  block:
+    # Everything below runs as the login user, without become.
+    - name: Check the run logs in as ws_user
+      ansible.builtin.assert:
+        that: ansible_facts.user_id == ws_user
+        fail_msg: "dotfiles are installed for the login user ({{ ansible_facts.user_id }}), which is not ws_user={{ ws_user }}"
+        quiet: true
+
+    - name: Create the config directory
+      ansible.builtin.file:
+        path: "{{ dotfiles_home }}/.config/ws"
+        state: directory
+        mode: "0700"
+
+    - name: Clone or update the repository
+      ansible.builtin.git:
+        repo: "{{ dotfiles_repo }}"
+        dest: "{{ dotfiles_dest }}"
+        version: "{{ dotfiles_ref }}"
+      register: dotfiles_checkout
+
+    # The marker holds the commit that was last applied; it is written last, so
+    # a failed install is retried on the next run.
+    - name: Read the applied commit
+      ansible.builtin.slurp:
+        src: "{{ dotfiles_marker }}"
+      register: dotfiles_applied
+      failed_when: false    # no marker yet: nothing was applied
+      check_mode: false
+
+    - name: Decide whether to apply
+      ansible.builtin.set_fact:
+        dotfiles_commit: "{{ dotfiles_checkout.after | default('') }}"
+        dotfiles_apply: >-
+          {{ (dotfiles_checkout.after | default('')) | length > 0
+             and ((dotfiles_applied.content | default('') | b64decode | trim) != dotfiles_checkout.after) }}
+
+    - name: Look for an install script
+      ansible.builtin.stat:
+        path: "{{ dotfiles_dest }}/{{ item }}"
+      loop: "{{ dotfiles_install_scripts }}"
+      register: dotfiles_scripts
+      check_mode: false
+
+    - name: Pick the first executable install script
+      ansible.builtin.set_fact:
+        dotfiles_script: >-
+          {{ dotfiles_scripts.results | selectattr('stat.exists') | selectattr('stat.executable')
+             | map(attribute='item') | first | default('') }}
+
+    - name: Run the install script
+      ansible.builtin.command:
+        argv: ["{{ dotfiles_dest }}/{{ dotfiles_script }}"]
+        chdir: "{{ dotfiles_dest }}"
+      register: dotfiles_install
+      changed_when: dotfiles_install.rc == 0
+      when:
+        - dotfiles_apply | bool
+        - dotfiles_script | length > 0
+
+    - name: Link dotfiles when there is no install script
+      when: dotfiles_script | length == 0
+      block:
+        - name: Find top-level dotfiles
+          ansible.builtin.find:
+            paths: "{{ dotfiles_dest }}"
+            patterns: ".*"
+            excludes: "{{ dotfiles_link_exclude }}"
+            hidden: true
+            file_type: any
+          register: dotfiles_found
+          check_mode: false
+
+        - name: Read what is in the home directory
+          ansible.builtin.stat:
+            path: "{{ dotfiles_home }}/{{ item.path | basename }}"
+            follow: false
+          loop: "{{ dotfiles_found.files }}"
+          loop_control:
+            label: "{{ item.path | basename }}"
+          register: dotfiles_existing
+          check_mode: false
+
+        # mv -n never overwrites an older backup; the link task below then
+        # fails on the file that is still in the way, and nothing is lost.
+        - name: Move existing files to .bak
+          ansible.builtin.command:
+            argv: [mv, -n, -T, "{{ item.stat.path }}", "{{ item.stat.path }}.bak"]
+          loop: "{{ dotfiles_existing.results }}"
+          loop_control:
+            label: "{{ item.item.path | basename }}"
+          register: dotfiles_backup
+          changed_when: dotfiles_backup.rc == 0
+          when:
+            - item.stat.exists
+            - not item.stat.islnk
+
+        - name: Link dotfiles into the home directory
+          ansible.builtin.file:
+            src: "{{ item.path }}"
+            dest: "{{ dotfiles_home }}/{{ item.path | basename }}"
+            state: link
+          loop: "{{ dotfiles_found.files }}"
+          loop_control:
+            label: "{{ item.path | basename }}"
+
+    - name: Record the applied commit
+      ansible.builtin.copy:
+        dest: "{{ dotfiles_marker }}"
+        mode: "0600"
+        content: "{{ dotfiles_commit }}\n"
+      when: dotfiles_commit | length > 0

@@ -1,0 +1,53 @@
+---
+- name: Check the target is supported
+  ansible.builtin.assert:
+    that: ws_target in auto_updates_role_targets
+    fail_msg: "auto_updates does not support ws_target={{ ws_target }}"
+    quiet: true
+
+- name: Check there is an origin to upgrade from
+  ansible.builtin.assert:
+    that: auto_updates_origins | length > 0
+    fail_msg: "auto_updates_origins is empty: nothing would ever be upgraded"
+    quiet: true
+
+- name: Configure automatic security updates
+  become: true
+  block:
+    - name: Install unattended-upgrades
+      ansible.builtin.apt:
+        name: unattended-upgrades
+        state: present
+        install_recommends: false
+        update_cache: true
+        cache_valid_time: 3600
+
+    - name: Turn on the daily update and upgrade runs
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/20auto-upgrades
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          // Managed by the openbake auto_updates role.
+          APT::Periodic::Update-Package-Lists "1";
+          APT::Periodic::Unattended-Upgrade "1";
+
+    # Sorts after the package's 50unattended-upgrades. apt appends to lists, so
+    # the packaged origins (which include the non-security release pocket) are
+    # cleared first.
+    - name: Limit upgrades to security origins
+      ansible.builtin.copy:
+        dest: /etc/apt/apt.conf.d/52ws-unattended-upgrades
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          // Managed by the openbake auto_updates role.
+          #clear Unattended-Upgrade::Allowed-Origins;
+          Unattended-Upgrade::Allowed-Origins {
+          {% for origin in auto_updates_origins %}
+            "{{ origin }}";
+          {% endfor %}
+          };
+          Unattended-Upgrade::Automatic-Reboot "{{ auto_updates_automatic_reboot | bool | lower }}";

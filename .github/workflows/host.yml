@@ -1,0 +1,35 @@
+---
+name: host
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: host-${{ github.ref }}
+  cancel-in-progress: true
+
+# Host-target checks run on the runner VM itself (it is disposable). Like ci.yml
+# this is a thin wrapper over make; actions are pinned to full commit SHAs.
+# Jobs for `make host` profiles are added with that target (M5).
+
+jobs:
+  ping:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      # Native tools (pinned, hash-checked) until the runner image lands (M8).
+      - name: bootstrap
+        run: ./bootstrap.sh
+      - name: make ping
+        run: make ping NATIVE=1
+      - name: Connectivity report
+        run: cat .state/reports/connectivity-local.json

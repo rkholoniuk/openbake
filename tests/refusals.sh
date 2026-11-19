@@ -29,7 +29,7 @@ refuse() {
 }
 
 # Host-only roles in an image build.
-for role in firewall hardening; do
+for role in firewall hardening auto_updates dotfiles; do
   refuse "$role with ws_target=image" "$role does not support ws_target=image" \
     -e "ws_role=$role" -e ws_target=image
 done
@@ -47,5 +47,15 @@ refuse "firewall rule with a bad source" "must be any, an address or a CIDR" \
   -e ws_role=firewall -e ws_target=host -e '{"firewall_allow": [{"port": 22, "from": "office"}]}'
 refuse "hardening with no SSH group" "hardening_ssh_groups is empty" \
   -e ws_role=hardening -e ws_target=host -e '{"hardening_ssh_groups": []}'
+
+refuse "auto_updates with no origins" "auto_updates_origins is empty" \
+  -e ws_role=auto_updates -e ws_target=host -e '{"auto_updates_origins": []}'
+# Local paths and git remote helpers (ext::, file://) must never be cloned.
+for repo in /etc "ext::sh -c id" file:///etc -oProxyCommand=id; do
+  refuse "dotfiles_repo=$repo" "dotfiles_repo must be an https:// or git@host:path URL" \
+    -e ws_role=dotfiles -e ws_target=host -e "{\"dotfiles_repo\": \"$repo\"}"
+done
+refuse "dotfiles_ref starting with a dash" "dotfiles_repo must be an https:// or git@host:path URL" \
+  -e ws_role=dotfiles -e ws_target=host -e '{"dotfiles_repo": "https://example.com/me/dotfiles", "dotfiles_ref": "--upload-pack=id"}'
 
 exit "$failed"

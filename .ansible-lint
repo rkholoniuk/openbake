@@ -14,6 +14,8 @@ exclude_paths:
 kinds:
   - playbook: "ansible/apply.yml"
   - playbook: "tests/syntax-check.yml"
+  - playbook: "tests/refusals.yml"
+  - playbook: "ansible/ping.yml"
 # Spike variable names (python_versions, mise_*, uv_version) are renamed when
 # versions.yml lands (M3); until then this rule only warns.
 warn_list:

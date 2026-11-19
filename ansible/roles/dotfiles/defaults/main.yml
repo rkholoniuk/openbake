@@ -1,0 +1,17 @@
+---
+dotfiles_role_targets: [host]
+
+# Your dotfiles repository, https://... or git@host:path. Empty: the role does nothing.
+dotfiles_repo: ""
+
+# Branch, tag or commit. Pin a commit: the repository's install script runs as
+# you on every change of this ref.
+dotfiles_ref: main
+
+# Coder dotfiles convention: the first of these that exists and is executable
+# is run from the checkout. Without one, top-level dotfiles are linked into the
+# home directory and existing files are moved to <name>.bak.
+dotfiles_install_scripts: [install.sh, install, bootstrap.sh, bootstrap, setup.sh, setup]
+
+# Top-level entries that are never linked into the home directory.
+dotfiles_link_exclude: [.git, .github, .gitignore, .gitmodules, .gitattributes]

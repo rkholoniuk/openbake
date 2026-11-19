@@ -1,0 +1,16 @@
+---
+argument_specs:
+  main:
+    short_description: Automatic security updates with unattended-upgrades
+    options:
+      auto_updates_role_targets:
+        type: list
+        elements: str
+        default: [host]
+      auto_updates_origins:
+        type: list
+        elements: str
+        required: true
+      auto_updates_automatic_reboot:
+        type: bool
+        default: false

@@ -1,0 +1,110 @@
+---
+# make ping: can we reach every host, and can every host reach the download
+# sources roles need? Read-only: nothing on a host is changed.
+#   ansible-playbook -i <inventory> ansible/ping.yml -e ws_inventory_name=<name> [-e ws_hosts=<limit>]
+# Writes .state/reports/connectivity-<name>.json and fails when a host is
+# unreachable or can't reach a source in ping_required.
+- name: Reachability and connectivity report
+  hosts: "{{ ws_hosts | default('all') }}"
+  gather_facts: false
+  vars:
+    ws_inventory_name: inventory
+    ping_sources: [archive.ubuntu.com, github.com, registry.npmjs.org, pypi.org]
+    # Sources a host must reach over at least one address family.
+    ping_required: "{{ ping_sources }}"
+    ping_timeout: 5
+    ping_report: "{{ (playbook_dir ~ '/..') | realpath }}/.state/reports/connectivity-{{ ws_inventory_name }}.json"
+  tasks:
+    - name: Check the inventory name
+      ansible.builtin.assert:
+        that: ws_inventory_name is match('^[A-Za-z0-9][A-Za-z0-9._-]*$')
+        fail_msg: "ws_inventory_name is used in a file name: letters, digits, dot, dash and underscore only"
+        quiet: true
+      run_once: true
+      delegate_to: localhost
+
+    - name: Reach the host
+      ansible.builtin.ping:
+
+    # IPv6 is probed only where the host has a global address.
+    - name: Read global IPv6 addresses
+      ansible.builtin.command: ip -6 -o addr show scope global
+      register: ping_ipv6
+      changed_when: false
+      check_mode: false
+
+    # getent exits 0 when the name resolves and 2 when it does not.
+    - name: Resolve the download sources
+      ansible.builtin.command:
+        argv: [getent, "ahostsv{{ item.1 }}", "{{ item.0 }}"]
+      loop: "{{ ping_sources | product(['4'] + (['6'] if ping_ipv6.stdout | trim | length > 0 else [])) | list }}"
+      loop_control:
+        label: "{{ item.0 }}/ipv{{ item.1 }}"
+      register: ping_dns
+      changed_when: false
+      failed_when: ping_dns.rc not in [0, 2]
+      check_mode: false
+
+    # Opens a TCP connection to port 443 of the resolved address and closes it.
+    # Exit 0: connected; 1: refused or unreachable; 124: timed out.
+    - name: Connect to the download sources
+      ansible.builtin.command:
+        argv: [timeout, "{{ ping_timeout }}", bash, -c, 'exec 3<>"/dev/tcp/$0/443"', "{{ item.stdout.split() | first }}"]
+      loop: "{{ ping_dns.results }}"
+      loop_control:
+        label: "{{ item.item.0 }}/ipv{{ item.item.1 }}"
+      register: ping_tcp
+      changed_when: false
+      failed_when: ping_tcp.rc not in [0, 1, 124]
+      check_mode: false
+      when: item.rc == 0
+
+    - name: Collect the result
+      ansible.builtin.set_fact:
+        ping_result:
+          reachable: true
+          ipv6: "{{ ping_ipv6.stdout | trim | length > 0 }}"
+          tried: "{{ ping_dns.results | map(attribute='item') | map('join', '/ipv') | list }}"
+          resolved: "{{ ping_dns.results | selectattr('rc', 'eq', 0) | map(attribute='item') | map('join', '/ipv') | list }}"
+          connected: >-
+            {{ ping_tcp.results | selectattr('rc', 'defined') | selectattr('rc', 'eq', 0)
+               | map(attribute='item.item') | map('join', '/ipv') | list }}
+
+    - name: Work out which required sources are out of reach
+      ansible.builtin.set_fact:
+        ping_missing: >-
+          {{ ping_required | reject('in', ping_result.connected | map('regex_replace', '/ipv[46]$', '') | list) | list }}
+
+    - name: Create the report directory
+      ansible.builtin.file:
+        path: "{{ ping_report | dirname }}"
+        state: directory
+        mode: "0755"
+      run_once: true
+      delegate_to: localhost
+
+    # One file for the whole inventory; hosts that could not be reached are listed too.
+    - name: Write the connectivity report
+      ansible.builtin.copy:
+        dest: "{{ ping_report }}"
+        mode: "0644"
+        content: "{{ ping_report_data | to_nice_json }}\n"
+      vars:
+        ping_report_data: >-
+          {{ dict(ansible_play_hosts_all | zip(ansible_play_hosts_all | map('extract', hostvars)
+             | map(attribute='ping_result', default={'reachable': false}))) }}
+      run_once: true
+      delegate_to: localhost
+
+    - name: Summary
+      ansible.builtin.debug:
+        msg: >-
+          {{ inventory_hostname }}: reachable, {{ ping_result.connected | length }}/{{ ping_result.tried | length }}
+          source checks passed, ipv6 {{ 'yes' if ping_result.ipv6 else 'no' }}{{
+          '' if ping_missing | length == 0 else ', OUT OF REACH: ' ~ (ping_missing | join(', ')) }}
+
+    - name: Check the required sources are reachable
+      ansible.builtin.assert:
+        that: ping_missing | length == 0
+        fail_msg: "{{ inventory_hostname }} cannot reach {{ ping_missing | join(', ') }} on port 443; see {{ ping_report }}"
+        quiet: true

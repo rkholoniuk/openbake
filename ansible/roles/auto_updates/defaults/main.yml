@@ -1,0 +1,13 @@
+---
+auto_updates_role_targets: [host]
+
+# Only these origins are upgraded automatically (security pockets, including
+# ESM when the machine is attached to Ubuntu Pro). apt expands ${distro_id}
+# and ${distro_codename}.
+auto_updates_origins:
+  - "${distro_id}:${distro_codename}-security"
+  - "${distro_id}ESMApps:${distro_codename}-apps-security"
+  - "${distro_id}ESM:${distro_codename}-infra-security"
+
+# Reboots stay a decision for the operator.
+auto_updates_automatic_reboot: false
