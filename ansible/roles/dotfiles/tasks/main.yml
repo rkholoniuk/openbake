@@ -5,14 +5,15 @@
     fail_msg: "dotfiles does not support ws_target={{ ws_target }}"
     quiet: true
 
-# Only https and SSH: no local paths, no git remote helpers (ext::, fd::), and
-# nothing git could read as an option.
+# Only https and SSH: no local paths, no git remote helpers (ext::, fd::),
+# nothing git could read as an option, and no user:token@ part (it would end
+# up in .git/config and in Ansible's output).
 - name: Check the repository URL and ref
   ansible.builtin.assert:
     that:
-      - dotfiles_repo is match('^(https://[A-Za-z0-9._~:/@%+-]+|git@[A-Za-z0-9._-]+:[A-Za-z0-9._~/+-]+)$')
+      - dotfiles_repo is match('^(https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9._~/%+-]+|git@[A-Za-z0-9._-]+:[A-Za-z0-9._~/+-]+)$')
       - dotfiles_ref is match('^[A-Za-z0-9][A-Za-z0-9._/-]*$')
-    fail_msg: "dotfiles_repo must be an https:// or git@host:path URL, and dotfiles_ref a branch, tag or commit"
+    fail_msg: "dotfiles_repo must be an https://host/path (no credentials) or git@host:path URL, and dotfiles_ref a branch, tag or commit"
     quiet: true
   when: dotfiles_repo | length > 0
 
@@ -105,6 +106,19 @@
           register: dotfiles_existing
           check_mode: false
 
+        # A real directory in the home directory is never moved or replaced:
+        # ~/.config holds this checkout, and others hold data and keys.
+        - name: Work out which names are directories in the home directory
+          ansible.builtin.set_fact:
+            dotfiles_kept: >-
+              {{ dotfiles_existing.results | selectattr('stat.exists') | selectattr('stat.isdir')
+                 | map(attribute='item.path') | map('basename') | list }}
+
+        - name: Report directories that were left alone
+          ansible.builtin.debug:
+            msg: "not linked, already a directory in {{ dotfiles_home }}: {{ dotfiles_kept | join(', ') }}"
+          when: dotfiles_kept | length > 0
+
         # mv -n never overwrites an older backup; the link task below then
         # fails on the file that is still in the way, and nothing is lost.
         - name: Move existing files to .bak
@@ -117,7 +131,7 @@
           changed_when: dotfiles_backup.rc == 0
           when:
             - item.stat.exists
-            - not item.stat.islnk
+            - item.stat.isreg
 
         - name: Link dotfiles into the home directory
           ansible.builtin.file:
@@ -127,6 +141,7 @@
           loop: "{{ dotfiles_found.files }}"
           loop_control:
             label: "{{ item.path | basename }}"
+          when: (item.path | basename) not in dotfiles_kept
 
     - name: Record the applied commit
       ansible.builtin.copy:

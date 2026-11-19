@@ -19,6 +19,10 @@ argument_specs:
       firewall_require_ssh_rule:
         type: bool
         default: true
+      firewall_docker_interfaces:
+        type: list
+        elements: str
+        required: true
       firewall_docker_local_cidrs:
         type: list
         elements: str

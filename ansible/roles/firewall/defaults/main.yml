@@ -16,6 +16,13 @@ firewall_require_ssh_rule: true
 
 # Docker publishes ports with its own iptables rules, which ufw does not see.
 # When Docker is installed, DOCKER-USER rules drop new connections to published
-# container ports unless the source is in this list or the published port is in
-# firewall_allow. Container and private-network traffic must stay allowed.
-firewall_docker_local_cidrs: [127.0.0.0/8, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+# container ports unless the published port is in firewall_allow.
+#
+# Traffic that containers send themselves arrives on a Docker bridge and stays
+# allowed; "+" is the iptables wildcard (br-+ matches every user-defined network).
+firewall_docker_interfaces: [docker0, br-+, docker_gwbridge]
+
+# Extra sources that may reach every published port. Empty by default: private
+# ranges are not "local" (a neighbour in the same VPC or LAN is still outside
+# this machine). Add a CIDR only for networks you trust with every container port.
+firewall_docker_local_cidrs: []

@@ -14,6 +14,18 @@
   loop_control:
     label: "{{ item.port }}"
 
+# These values are written into an iptables-restore file that root loads.
+- name: Check the Docker filter settings
+  ansible.builtin.assert:
+    that:
+      - firewall_docker_interfaces | length > 0
+      - firewall_docker_interfaces | reject('match', '^([A-Za-z0-9_.-]{1,15}|[A-Za-z0-9_.-]{1,14}[+])$') | list | length == 0
+      - firewall_docker_local_cidrs | reject('match', '^[0-9]{1,3}(\\.[0-9]{1,3}){3}(/[0-9]{1,2})?$') | list | length == 0
+    fail_msg: >-
+      firewall_docker_interfaces takes interface names (a trailing + is a wildcard) and
+      firewall_docker_local_cidrs takes IPv4 addresses or CIDRs
+    quiet: true
+
 # Enabling ufw without a rule for the port this run uses would lock us out.
 - name: Check the SSH port stays reachable
   ansible.builtin.assert:
@@ -94,8 +106,10 @@
         - ('ufw ' ~ firewall_rule) not in firewall_added.stdout_lines
 
     # A second *filter block in after.rules; ufw loads it with its own rules.
-    # DOCKER-USER sees traffic after DNAT, so published ports are matched with
-    # the connection's original destination port (ctorigdstport).
+    # DOCKER-USER sees forwarded traffic after DNAT, so published ports are
+    # matched with the connection's original destination port (ctorigdstport).
+    # Containers' own traffic is recognised by the bridge it arrives on, never
+    # by source address: a private source address can be a neighbour's machine.
     - name: Filter Docker-published ports
       ansible.builtin.blockinfile:
         path: /etc/ufw/after.rules
@@ -105,6 +119,9 @@
           *filter
           :DOCKER-USER - [0:0]
           -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j RETURN
+          {% for iface in firewall_docker_interfaces %}
+          -A DOCKER-USER -i {{ iface }} -j RETURN
+          {% endfor %}
           {% for cidr in firewall_docker_local_cidrs %}
           -A DOCKER-USER -s {{ cidr }} -j RETURN
           {% endfor %}
